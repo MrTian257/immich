@@ -12,9 +12,9 @@ import { PersonEntity } from 'src/entities/person.entity';
 import { SessionEntity } from 'src/entities/session.entity';
 import { SharedLinkEntity } from 'src/entities/shared-link.entity';
 import { StackEntity } from 'src/entities/stack.entity';
+import { TagEntity } from 'src/entities/tag.entity';
 import { AlbumUserRole } from 'src/enum';
 import { IAccessRepository } from 'src/interfaces/access.interface';
-import { Instrumentation } from 'src/utils/instrumentation';
 import { Brackets, In, Repository } from 'typeorm';
 
 type IActivityAccess = IAccessRepository['activity'];
@@ -25,9 +25,9 @@ type IMemoryAccess = IAccessRepository['memory'];
 type IPersonAccess = IAccessRepository['person'];
 type IPartnerAccess = IAccessRepository['partner'];
 type IStackAccess = IAccessRepository['stack'];
+type ITagAccess = IAccessRepository['tag'];
 type ITimelineAccess = IAccessRepository['timeline'];
 
-@Instrumentation()
 @Injectable()
 class ActivityAccess implements IActivityAccess {
   constructor(
@@ -444,6 +444,28 @@ class PartnerAccess implements IPartnerAccess {
   }
 }
 
+class TagAccess implements ITagAccess {
+  constructor(private tagRepository: Repository<TagEntity>) {}
+
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET] })
+  @ChunkedSet({ paramIndex: 1 })
+  async checkOwnerAccess(userId: string, tagIds: Set<string>): Promise<Set<string>> {
+    if (tagIds.size === 0) {
+      return new Set();
+    }
+
+    return this.tagRepository
+      .find({
+        select: { id: true },
+        where: {
+          id: In([...tagIds]),
+          userId,
+        },
+      })
+      .then((tags) => new Set(tags.map((tag) => tag.id)));
+  }
+}
+
 export class AccessRepository implements IAccessRepository {
   activity: IActivityAccess;
   album: IAlbumAccess;
@@ -453,6 +475,7 @@ export class AccessRepository implements IAccessRepository {
   person: IPersonAccess;
   partner: IPartnerAccess;
   stack: IStackAccess;
+  tag: ITagAccess;
   timeline: ITimelineAccess;
 
   constructor(
@@ -467,6 +490,7 @@ export class AccessRepository implements IAccessRepository {
     @InjectRepository(SharedLinkEntity) sharedLinkRepository: Repository<SharedLinkEntity>,
     @InjectRepository(SessionEntity) sessionRepository: Repository<SessionEntity>,
     @InjectRepository(StackEntity) stackRepository: Repository<StackEntity>,
+    @InjectRepository(TagEntity) tagRepository: Repository<TagEntity>,
   ) {
     this.activity = new ActivityAccess(activityRepository, albumRepository);
     this.album = new AlbumAccess(albumRepository, sharedLinkRepository);
@@ -476,6 +500,7 @@ export class AccessRepository implements IAccessRepository {
     this.person = new PersonAccess(assetFaceRepository, personRepository);
     this.partner = new PartnerAccess(partnerRepository);
     this.stack = new StackAccess(stackRepository);
+    this.tag = new TagAccess(tagRepository);
     this.timeline = new TimelineAccess(partnerRepository);
   }
 }
