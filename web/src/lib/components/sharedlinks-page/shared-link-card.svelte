@@ -12,13 +12,16 @@
   import ButtonContextMenu from '$lib/components/shared-components/context-menu/button-context-menu.svelte';
   import { mdiDotsVertical } from '@mdi/js';
 
-  export let link: SharedLinkResponseDto;
-  export let onDelete: () => void;
-  export let onEdit: () => void;
+  interface Props {
+    link: SharedLinkResponseDto;
+    onDelete: () => void;
+  }
+
+  let { link, onDelete }: Props = $props();
 
   let now = DateTime.now();
-  $: expiresAt = link.expiresAt ? DateTime.fromISO(link.expiresAt) : undefined;
-  $: isExpired = expiresAt ? now > expiresAt : false;
+  let expiresAt = $derived(link.expiresAt ? DateTime.fromISO(link.expiresAt) : undefined);
+  let isExpired = $derived(expiresAt ? now > expiresAt : false);
 
   const getCountDownExpirationDate = (expiresAtDate: DateTime, now: DateTime) => {
     const relativeUnits: ToRelativeUnit[] = ['days', 'hours', 'minutes', 'seconds'];
@@ -91,10 +94,9 @@
       </div>
     </div>
   </svelte:element>
-
   <div class="flex flex-auto flex-col place-content-center place-items-end text-end ms-4">
     <div class="sm:flex hidden">
-      <SharedLinkEdit {onEdit} />
+      <SharedLinkEdit sharedLink={link} />
       <SharedLinkCopy {link} />
       <SharedLinkDelete {onDelete} />
     </div>
@@ -108,7 +110,7 @@
         padding="3"
         hideContent
       >
-        <SharedLinkEdit menuItem {onEdit} />
+        <SharedLinkEdit menuItem sharedLink={link} />
         <SharedLinkCopy menuItem {link} />
         <SharedLinkDelete menuItem {onDelete} />
       </ButtonContextMenu>

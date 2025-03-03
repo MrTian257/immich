@@ -8,6 +8,7 @@ const getEnv = () => {
 
 const resetEnv = () => {
   for (const env of [
+    'IMMICH_ENV',
     'IMMICH_WORKERS_INCLUDE',
     'IMMICH_WORKERS_EXCLUDE',
     'IMMICH_TRUSTED_PROXIES',
@@ -62,18 +63,39 @@ describe('getEnv', () => {
     resetEnv();
   });
 
+  it('should use defaults', () => {
+    const config = getEnv();
+
+    expect(config).toMatchObject({
+      host: undefined,
+      port: 2283,
+      environment: 'production',
+      configFile: undefined,
+      logLevel: undefined,
+    });
+  });
+
   describe('database', () => {
     it('should use defaults', () => {
       const { database } = getEnv();
       expect(database).toEqual({
-        config: expect.objectContaining({
-          type: 'postgres',
-          host: 'database',
-          port: 5432,
-          database: 'immich',
-          username: 'postgres',
-          password: 'postgres',
-        }),
+        config: {
+          kysely: expect.objectContaining({
+            host: 'database',
+            port: 5432,
+            database: 'immich',
+            username: 'postgres',
+            password: 'postgres',
+          }),
+          typeorm: expect.objectContaining({
+            type: 'postgres',
+            host: 'database',
+            port: 5432,
+            database: 'immich',
+            username: 'postgres',
+            password: 'postgres',
+          }),
+        },
         skipMigrations: false,
         vectorExtension: 'vectors',
       });
@@ -83,6 +105,94 @@ describe('getEnv', () => {
       process.env.DB_SKIP_MIGRATIONS = 'true';
       const { database } = getEnv();
       expect(database).toMatchObject({ skipMigrations: true });
+    });
+
+    it('should use DB_URL', () => {
+      process.env.DB_URL = 'postgres://postgres1:postgres2@database1:54320/immich';
+      const { database } = getEnv();
+      expect(database.config.kysely).toMatchObject({
+        host: 'database1',
+        password: 'postgres2',
+        user: 'postgres1',
+        port: 54_320,
+        database: 'immich',
+      });
+    });
+
+    it('should handle sslmode=require', () => {
+      process.env.DB_URL = 'postgres://postgres1:postgres2@database1:54320/immich?sslmode=require';
+
+      const { database } = getEnv();
+
+      expect(database.config.kysely).toMatchObject({ ssl: {} });
+    });
+
+    it('should handle sslmode=prefer', () => {
+      process.env.DB_URL = 'postgres://postgres1:postgres2@database1:54320/immich?sslmode=prefer';
+
+      const { database } = getEnv();
+
+      expect(database.config.kysely).toMatchObject({ ssl: {} });
+    });
+
+    it('should handle sslmode=verify-ca', () => {
+      process.env.DB_URL = 'postgres://postgres1:postgres2@database1:54320/immich?sslmode=verify-ca';
+
+      const { database } = getEnv();
+
+      expect(database.config.kysely).toMatchObject({ ssl: {} });
+    });
+
+    it('should handle sslmode=verify-full', () => {
+      process.env.DB_URL = 'postgres://postgres1:postgres2@database1:54320/immich?sslmode=verify-full';
+
+      const { database } = getEnv();
+
+      expect(database.config.kysely).toMatchObject({ ssl: {} });
+    });
+
+    it('should handle sslmode=no-verify', () => {
+      process.env.DB_URL = 'postgres://postgres1:postgres2@database1:54320/immich?sslmode=no-verify';
+
+      const { database } = getEnv();
+
+      expect(database.config.kysely).toMatchObject({ ssl: { rejectUnauthorized: false } });
+    });
+
+    it('should handle ssl=true', () => {
+      process.env.DB_URL = 'postgres://postgres1:postgres2@database1:54320/immich?ssl=true';
+
+      const { database } = getEnv();
+
+      expect(database.config.kysely).toMatchObject({ ssl: true });
+    });
+
+    it('should reject invalid ssl', () => {
+      process.env.DB_URL = 'postgres://postgres1:postgres2@database1:54320/immich?ssl=invalid';
+
+      expect(() => getEnv()).toThrowError('Invalid ssl option: invalid');
+    });
+
+    it('should handle socket: URLs', () => {
+      process.env.DB_URL = 'socket:/run/postgresql?db=database1';
+
+      const { database } = getEnv();
+
+      expect(database.config.kysely).toMatchObject({
+        host: '/run/postgresql',
+        database: 'database1',
+      });
+    });
+
+    it('should handle sockets in postgres: URLs', () => {
+      process.env.DB_URL = 'postgres:///database2?host=/path/to/socket';
+
+      const { database } = getEnv();
+
+      expect(database.config.kysely).toMatchObject({
+        host: '/path/to/socket',
+        database: 'database2',
+      });
     });
   });
 
@@ -191,7 +301,7 @@ describe('getEnv', () => {
     it('should return default network options', () => {
       const { network } = getEnv();
       expect(network).toEqual({
-        trustedProxies: [],
+        trustedProxies: ['linklocal', 'uniquelocal'],
       });
     });
 
@@ -201,6 +311,11 @@ describe('getEnv', () => {
       expect(network).toEqual({
         trustedProxies: ['10.1.0.0', '10.2.0.0', '169.254.0.0/16'],
       });
+    });
+
+    it('should reject invalid trusted proxies', () => {
+      process.env.IMMICH_TRUSTED_PROXIES = '10.1';
+      expect(() => getEnv()).toThrowError('Invalid environment variables: IMMICH_TRUSTED_PROXIES');
     });
   });
 

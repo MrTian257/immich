@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { focusOutside } from '$lib/actions/focus-outside';
+  import Icon from '$lib/components/elements/icon.svelte';
+  import ButtonContextMenu from '$lib/components/shared-components/context-menu/button-context-menu.svelte';
   import { AppRoute, QueryParameter } from '$lib/constants';
   import { getPeopleThumbnailUrl } from '$lib/utils';
   import { type PersonResponseDto } from '@immich/sdk';
@@ -8,35 +11,49 @@
     mdiCalendarEditOutline,
     mdiDotsVertical,
     mdiEyeOffOutline,
+    mdiHeart,
+    mdiHeartMinusOutline,
+    mdiHeartOutline,
   } from '@mdi/js';
+  import { t } from 'svelte-i18n';
   import ImageThumbnail from '../assets/thumbnail/image-thumbnail.svelte';
   import MenuOption from '../shared-components/context-menu/menu-option.svelte';
-  import { t } from 'svelte-i18n';
-  import { focusOutside } from '$lib/actions/focus-outside';
-  import ButtonContextMenu from '$lib/components/shared-components/context-menu/button-context-menu.svelte';
 
-  export let person: PersonResponseDto;
-  export let preload = false;
-  export let onChangeName: () => void;
-  export let onSetBirthDate: () => void;
-  export let onMergePeople: () => void;
-  export let onHidePerson: () => void;
+  interface Props {
+    person: PersonResponseDto;
+    preload?: boolean;
+    onChangeName: () => void;
+    onSetBirthDate: () => void;
+    onMergePeople: () => void;
+    onHidePerson: () => void;
+    onToggleFavorite: () => void;
+  }
 
-  let showVerticalDots = false;
+  let {
+    person,
+    preload = false,
+    onChangeName,
+    onSetBirthDate,
+    onMergePeople,
+    onHidePerson,
+    onToggleFavorite,
+  }: Props = $props();
+
+  let showVerticalDots = $state(false);
 </script>
 
 <div
   id="people-card"
   class="relative"
-  on:mouseenter={() => (showVerticalDots = true)}
-  on:mouseleave={() => (showVerticalDots = false)}
+  onmouseenter={() => (showVerticalDots = true)}
+  onmouseleave={() => (showVerticalDots = false)}
   role="group"
   use:focusOutside={{ onFocusOut: () => (showVerticalDots = false) }}
 >
   <a
     href="{AppRoute.PEOPLE}/{person.id}?{QueryParameter.PREVIOUS_ROUTE}={AppRoute.PEOPLE}"
     draggable="false"
-    on:focus={() => (showVerticalDots = true)}
+    onfocus={() => (showVerticalDots = true)}
   >
     <div class="w-full h-full rounded-xl brightness-95 filter">
       <ImageThumbnail
@@ -47,6 +64,11 @@
         title={person.name}
         widthStyle="100%"
       />
+      {#if person.isFavorite}
+        <div class="absolute top-2 left-2">
+          <Icon path={mdiHeart} size="24" class="text-white" />
+        </div>
+      {/if}
     </div>
     {#if person.name}
       <span
@@ -72,6 +94,11 @@
         <MenuOption onClick={onChangeName} icon={mdiAccountEditOutline} text={$t('change_name')} />
         <MenuOption onClick={onSetBirthDate} icon={mdiCalendarEditOutline} text={$t('set_date_of_birth')} />
         <MenuOption onClick={onMergePeople} icon={mdiAccountMultipleCheckOutline} text={$t('merge_people')} />
+        <MenuOption
+          onClick={onToggleFavorite}
+          icon={person.isFavorite ? mdiHeartMinusOutline : mdiHeartOutline}
+          text={person.isFavorite ? $t('unfavorite') : $t('to_favorite')}
+        />
       </ButtonContextMenu>
     </div>
   {/if}

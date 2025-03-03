@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { OnJob } from 'src/decorators';
 import { BulkIdResponseDto, BulkIdsDto } from 'src/dtos/asset-ids.response.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import {
@@ -11,9 +12,8 @@ import {
   mapTag,
 } from 'src/dtos/tag.dto';
 import { TagEntity } from 'src/entities/tag.entity';
-import { Permission } from 'src/enum';
-import { JobStatus } from 'src/interfaces/job.interface';
-import { AssetTagItem } from 'src/interfaces/tag.interface';
+import { JobName, JobStatus, Permission, QueueName } from 'src/enum';
+import { AssetTagItem } from 'src/repositories/tag.repository';
 import { BaseService } from 'src/services/base.service';
 import { addAssets, removeAssets } from 'src/utils/asset.util';
 import { upsertTags } from 'src/utils/tag';
@@ -48,7 +48,8 @@ export class TagService extends BaseService {
       throw new BadRequestException(`A tag with that name already exists`);
     }
 
-    const tag = await this.tagRepository.create({ userId, value, parent });
+    const { color } = dto;
+    const tag = await this.tagRepository.create({ userId, value, color, parent });
 
     return mapTag(tag);
   }
@@ -131,6 +132,7 @@ export class TagService extends BaseService {
     return results;
   }
 
+  @OnJob({ name: JobName.TAG_CLEANUP, queue: QueueName.BACKGROUND_TASK })
   async handleTagCleanup() {
     await this.tagRepository.deleteEmptyTags();
     return JobStatus.SUCCESS;

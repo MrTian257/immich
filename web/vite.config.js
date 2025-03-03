@@ -1,5 +1,6 @@
 import { enhancedImages } from '@sveltejs/enhanced-img';
 import { sveltekit } from '@sveltejs/kit/vite';
+import { svelteTesting } from '@testing-library/svelte/vite';
 import path from 'node:path';
 import { visualizer } from 'rollup-plugin-visualizer';
 import { defineConfig } from 'vite';
@@ -18,6 +19,7 @@ export default defineConfig({
       'xmlhttprequest-ssl': './node_modules/engine.io-client/lib/xmlhttprequest.js',
       // eslint-disable-next-line unicorn/prefer-module
       '@test-data': path.resolve(__dirname, './src/test-data'),
+      // '@immich/ui': path.resolve(__dirname, '../../ui'),
     },
   },
   server: {
@@ -27,6 +29,7 @@ export default defineConfig({
       '/.well-known/immich': upstream,
       '/custom.css': upstream,
     },
+    allowedHosts: true,
   },
   plugins: [
     sveltekit(),
@@ -37,6 +40,7 @@ export default defineConfig({
         })
       : undefined,
     enhancedImages(),
+    svelteTesting(),
   ],
   optimizeDeps: {
     entries: ['src/**/*.{svelte,ts,html}'],
@@ -49,6 +53,5 @@ export default defineConfig({
     sequence: {
       hooks: 'list',
     },
-    alias: [{ find: /^svelte$/, replacement: 'svelte/internal' }],
   },
 });

@@ -19,18 +19,22 @@
     mdiTagFaces,
     mdiVideo,
   } from '@mdi/js';
-  import type { ComponentType } from 'svelte';
+  import type { Component } from 'svelte';
   import JobTile from './job-tile.svelte';
   import StorageMigrationDescription from './storage-migration-description.svelte';
   import { dialogController } from '$lib/components/shared-components/dialog/dialog';
   import { t } from 'svelte-i18n';
 
-  export let jobs: AllJobStatusResponseDto;
+  interface Props {
+    jobs: AllJobStatusResponseDto;
+  }
+
+  let { jobs = $bindable() }: Props = $props();
 
   interface JobDetails {
     title: string;
     subtitle?: string;
-    description?: ComponentType;
+    description?: Component;
     allText?: string;
     refreshText?: string;
     missingText: string;
@@ -56,7 +60,7 @@
     await handleCommand(jobId, dto);
   };
 
-  $: jobDetails = <Partial<Record<JobName, JobDetails>>>{
+  let jobDetails: Partial<Record<JobName, JobDetails>> = {
     [JobName.ThumbnailGeneration]: {
       icon: mdiFileJpgBox,
       title: $getJobName(JobName.ThumbnailGeneration),
@@ -75,8 +79,7 @@
       icon: mdiLibraryShelves,
       title: $getJobName(JobName.Library),
       subtitle: $t('admin.library_tasks_description'),
-      allText: $t('all'),
-      missingText: $t('refresh'),
+      missingText: $t('rescan'),
     },
     [JobName.Sidecar]: {
       title: $getJobName(JobName.Sidecar),
@@ -131,17 +134,18 @@
     [JobName.StorageTemplateMigration]: {
       icon: mdiFolderMove,
       title: $getJobName(JobName.StorageTemplateMigration),
-      missingText: $t('missing'),
+      missingText: $t('start'),
       description: StorageMigrationDescription,
     },
     [JobName.Migration]: {
       icon: mdiFolderMove,
       title: $getJobName(JobName.Migration),
       subtitle: $t('admin.migration_job_description'),
-      missingText: $t('missing'),
+      missingText: $t('start'),
     },
   };
-  $: jobList = Object.entries(jobDetails) as [JobName, JobDetails][];
+
+  let jobList = Object.entries(jobDetails) as [JobName, JobDetails][];
 
   async function handleCommand(jobId: JobName, jobCommand: JobCommandDto) {
     const title = jobDetails[jobId]?.title;

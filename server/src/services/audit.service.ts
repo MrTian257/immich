@@ -1,54 +1,30 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { DateTime } from 'luxon';
 import { resolve } from 'node:path';
-import { AUDIT_LOG_MAX_DURATION } from 'src/constants';
+import { AUDIT_LOG_MAX_DURATION, JOBS_ASSET_PAGINATION_SIZE } from 'src/constants';
 import { StorageCore } from 'src/cores/storage.core';
-import {
-  AuditDeletesDto,
-  AuditDeletesResponseDto,
-  FileChecksumDto,
-  FileChecksumResponseDto,
-  FileReportItemDto,
-  PathEntityType,
-} from 'src/dtos/audit.dto';
-import { AuthDto } from 'src/dtos/auth.dto';
+import { OnJob } from 'src/decorators';
+import { FileChecksumDto, FileChecksumResponseDto, FileReportItemDto, PathEntityType } from 'src/dtos/audit.dto';
 import {
   AssetFileType,
   AssetPathType,
-  DatabaseAction,
-  Permission,
+  JobName,
+  JobStatus,
   PersonPathType,
+  QueueName,
   StorageFolder,
   UserPathType,
 } from 'src/enum';
-import { JOBS_ASSET_PAGINATION_SIZE, JobStatus } from 'src/interfaces/job.interface';
 import { BaseService } from 'src/services/base.service';
 import { getAssetFiles } from 'src/utils/asset.util';
 import { usePagination } from 'src/utils/pagination';
 
 @Injectable()
 export class AuditService extends BaseService {
+  @OnJob({ name: JobName.CLEAN_OLD_AUDIT_LOGS, queue: QueueName.BACKGROUND_TASK })
   async handleCleanup(): Promise<JobStatus> {
     await this.auditRepository.removeBefore(DateTime.now().minus(AUDIT_LOG_MAX_DURATION).toJSDate());
     return JobStatus.SUCCESS;
-  }
-
-  async getDeletes(auth: AuthDto, dto: AuditDeletesDto): Promise<AuditDeletesResponseDto> {
-    const userId = dto.userId || auth.user.id;
-    await this.requireAccess({ auth, permission: Permission.TIMELINE_READ, ids: [userId] });
-
-    const audits = await this.auditRepository.getAfter(dto.after, {
-      userIds: [userId],
-      entityType: dto.entityType,
-      action: DatabaseAction.DELETE,
-    });
-
-    const duration = DateTime.now().diff(DateTime.fromJSDate(dto.after));
-
-    return {
-      needsFullSync: duration > AUDIT_LOG_MAX_DURATION,
-      ids: audits,
-    };
   }
 
   async getChecksums(dto: FileChecksumDto) {
@@ -199,20 +175,21 @@ export class AuditService extends BaseService {
       }
     }
 
-    const personPagination = usePagination(JOBS_ASSET_PAGINATION_SIZE, (pagination) =>
-      this.personRepository.getAll(pagination),
-    );
-    for await (const people of personPagination) {
-      for (const { id, thumbnailPath } of people) {
-        track(thumbnailPath);
-        const entity = { entityId: id, entityType: PathEntityType.PERSON };
-        if (thumbnailPath && !hasFile(thumbFiles, thumbnailPath)) {
-          orphans.push({ ...entity, pathType: PersonPathType.FACE, pathValue: thumbnailPath });
-        }
+    let peopleCount = 0;
+    for await (const { id, thumbnailPath } of this.personRepository.getAll()) {
+      track(thumbnailPath);
+      const entity = { entityId: id, entityType: PathEntityType.PERSON };
+      if (thumbnailPath && !hasFile(thumbFiles, thumbnailPath)) {
+        orphans.push({ ...entity, pathType: PersonPathType.FACE, pathValue: thumbnailPath });
       }
 
-      this.logger.log(`Found ${assetCount} assets, ${users.length} users, ${people.length} people`);
+      if (peopleCount === JOBS_ASSET_PAGINATION_SIZE) {
+        this.logger.log(`Found ${assetCount} assets, ${users.length} users, ${peopleCount} people`);
+        peopleCount = 0;
+      }
     }
+
+    this.logger.log(`Found ${assetCount} assets, ${users.length} users, ${peopleCount} people`);
 
     const extras: string[] = [];
     for (const file of allFiles) {

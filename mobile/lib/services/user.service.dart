@@ -35,8 +35,9 @@ class UserService {
     this._syncService,
   );
 
-  Future<List<User>> getUsers({bool self = false}) =>
-      _userRepository.getAll(self: self);
+  Future<List<User>> getUsers({bool self = false}) {
+    return _userRepository.getAll(self: self);
+  }
 
   Future<({String profileImagePath})?> uploadProfileImage(XFile image) async {
     try {
@@ -101,5 +102,19 @@ class UserService {
     final users = await getUsersFromServer();
     if (users == null) return false;
     return _syncService.syncUsersFromServer(users);
+  }
+
+  Future<void> clearTable() {
+    return _userRepository.clearTable();
+  }
+
+  Future<List<int>> getTimelineUserIds() async {
+    final me = await _userRepository.me();
+    return _userRepository.getTimelineUserIds(me.isarId);
+  }
+
+  Stream<List<int>> watchTimelineUserIds() async* {
+    final me = await _userRepository.me();
+    yield* _userRepository.watchTimelineUsers(me.isarId);
   }
 }

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { DateTime } from 'luxon';
 import { SALT_ROUNDS } from 'src/constants';
 import { StorageCore } from 'src/cores/storage.core';
+import { OnJob } from 'src/decorators';
 import { AuthDto } from 'src/dtos/auth.dto';
 import { LicenseKeyDto, LicenseResponseDto } from 'src/dtos/license.dto';
 import { UserPreferencesResponseDto, UserPreferencesUpdateDto, mapPreferences } from 'src/dtos/user-preferences.dto';
@@ -9,22 +10,36 @@ import { CreateProfileImageResponseDto } from 'src/dtos/user-profile.dto';
 import { UserAdminResponseDto, UserResponseDto, UserUpdateMeDto, mapUser, mapUserAdmin } from 'src/dtos/user.dto';
 import { UserMetadataEntity } from 'src/entities/user-metadata.entity';
 import { UserEntity } from 'src/entities/user.entity';
-import { CacheControl, StorageFolder, UserMetadataKey } from 'src/enum';
-import { IEntityJob, JobName, JobStatus } from 'src/interfaces/job.interface';
-import { UserFindOptions } from 'src/interfaces/user.interface';
+import { CacheControl, JobName, JobStatus, QueueName, StorageFolder, UserMetadataKey } from 'src/enum';
+import { UserFindOptions } from 'src/repositories/user.repository';
 import { BaseService } from 'src/services/base.service';
+import { JobOf } from 'src/types';
 import { ImmichFileResponse } from 'src/utils/file';
 import { getPreferences, getPreferencesPartial, mergePreferences } from 'src/utils/preferences';
 
 @Injectable()
 export class UserService extends BaseService {
-  async search(): Promise<UserResponseDto[]> {
-    const users = await this.userRepository.getList({ withDeleted: false });
+  async search(auth: AuthDto): Promise<UserResponseDto[]> {
+    const config = await this.getConfig({ withCache: false });
+
+    let users;
+    if (auth.user.isAdmin || config.server.publicUsers) {
+      users = await this.userRepository.getList({ withDeleted: false });
+    } else {
+      const authUser = await this.userRepository.get(auth.user.id, {});
+      users = authUser ? [authUser] : [];
+    }
+
     return users.map((user) => mapUser(user));
   }
 
-  getMe(auth: AuthDto): UserAdminResponseDto {
-    return mapUserAdmin(auth.user);
+  async getMe(auth: AuthDto): Promise<UserAdminResponseDto> {
+    const user = await this.userRepository.get(auth.user.id, {});
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    return mapUserAdmin(user);
   }
 
   async updateMe({ user }: AuthDto, dto: UserUpdateMeDto): Promise<UserAdminResponseDto> {
@@ -51,20 +66,23 @@ export class UserService extends BaseService {
     return mapUserAdmin(updatedUser);
   }
 
-  getMyPreferences({ user }: AuthDto): UserPreferencesResponseDto {
-    const preferences = getPreferences(user);
+  async getMyPreferences(auth: AuthDto): Promise<UserPreferencesResponseDto> {
+    const metadata = await this.userRepository.getMetadata(auth.user.id);
+    const preferences = getPreferences(auth.user.email, metadata);
     return mapPreferences(preferences);
   }
 
-  async updateMyPreferences({ user }: AuthDto, dto: UserPreferencesUpdateDto) {
-    const preferences = mergePreferences(user, dto);
+  async updateMyPreferences(auth: AuthDto, dto: UserPreferencesUpdateDto) {
+    const metadata = await this.userRepository.getMetadata(auth.user.id);
+    const current = getPreferences(auth.user.email, metadata);
+    const updated = mergePreferences(current, dto);
 
-    await this.userRepository.upsertMetadata(user.id, {
+    await this.userRepository.upsertMetadata(auth.user.id, {
       key: UserMetadataKey.PREFERENCES,
-      value: getPreferencesPartial(user, preferences),
+      value: getPreferencesPartial(auth.user, updated),
     });
 
-    return mapPreferences(preferences);
+    return mapPreferences(updated);
   }
 
   async get(id: string): Promise<UserResponseDto> {
@@ -113,14 +131,16 @@ export class UserService extends BaseService {
     });
   }
 
-  getLicense({ user }: AuthDto): LicenseResponseDto {
-    const license = user.metadata.find(
+  async getLicense(auth: AuthDto): Promise<LicenseResponseDto> {
+    const metadata = await this.userRepository.getMetadata(auth.user.id);
+
+    const license = metadata.find(
       (item): item is UserMetadataEntity<UserMetadataKey.LICENSE> => item.key === UserMetadataKey.LICENSE,
     );
     if (!license) {
       throw new NotFoundException();
     }
-    return license.value;
+    return { ...license.value, activatedAt: new Date(license.value.activatedAt) };
   }
 
   async deleteLicense({ user }: AuthDto): Promise<void> {
@@ -150,24 +170,23 @@ export class UserService extends BaseService {
       throw new BadRequestException('Invalid license key');
     }
 
-    const licenseData = {
-      ...license,
-      activatedAt: new Date(),
-    };
+    const activatedAt = new Date();
 
     await this.userRepository.upsertMetadata(auth.user.id, {
       key: UserMetadataKey.LICENSE,
-      value: licenseData,
+      value: { ...license, activatedAt: activatedAt.toISOString() },
     });
 
-    return licenseData;
+    return { ...license, activatedAt };
   }
 
+  @OnJob({ name: JobName.USER_SYNC_USAGE, queue: QueueName.BACKGROUND_TASK })
   async handleUserSyncUsage(): Promise<JobStatus> {
     await this.userRepository.syncUsage();
     return JobStatus.SUCCESS;
   }
 
+  @OnJob({ name: JobName.USER_DELETE_CHECK, queue: QueueName.BACKGROUND_TASK })
   async handleUserDeleteCheck(): Promise<JobStatus> {
     const users = await this.userRepository.getDeletedUsers();
     const config = await this.getConfig({ withCache: false });
@@ -181,7 +200,8 @@ export class UserService extends BaseService {
     return JobStatus.SUCCESS;
   }
 
-  async handleUserDelete({ id, force }: IEntityJob): Promise<JobStatus> {
+  @OnJob({ name: JobName.USER_DELETION, queue: QueueName.BACKGROUND_TASK })
+  async handleUserDelete({ id, force }: JobOf<JobName.USER_DELETION>): Promise<JobStatus> {
     const config = await this.getConfig({ withCache: false });
     const user = await this.userRepository.get(id, { withDeleted: true });
     if (!user) {

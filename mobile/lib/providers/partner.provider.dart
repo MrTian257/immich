@@ -1,53 +1,81 @@
 import 'dart:async';
 
+import 'package:collection/collection.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/providers/album/suggested_shared_users.provider.dart';
 import 'package:immich_mobile/services/partner.service.dart';
 import 'package:immich_mobile/entities/user.entity.dart';
-import 'package:immich_mobile/providers/db.provider.dart';
-import 'package:isar/isar.dart';
 
 class PartnerSharedWithNotifier extends StateNotifier<List<User>> {
-  PartnerSharedWithNotifier(Isar db, this._ps) : super([]) {
-    final query = db.users.filter().isPartnerSharedWithEqualTo(true);
-    query.findAll().then((partners) => state = partners);
-    query.watch().listen((partners) => state = partners);
+  final PartnerService _partnerService;
+  late final StreamSubscription<List<User>> streamSub;
+
+  PartnerSharedWithNotifier(this._partnerService) : super([]) {
+    Function eq = const ListEquality<User>().equals;
+    _partnerService.getSharedWith().then((partners) {
+      if (!eq(state, partners)) {
+        state = partners;
+      }
+    }).then((_) {
+      streamSub = _partnerService.watchSharedWith().listen((partners) {
+        if (!eq(state, partners)) {
+          state = partners;
+        }
+      });
+    });
   }
 
   Future<bool> updatePartner(User partner, {required bool inTimeline}) {
-    return _ps.updatePartner(partner, inTimeline: inTimeline);
+    return _partnerService.updatePartner(partner, inTimeline: inTimeline);
   }
 
-  final PartnerService _ps;
+  @override
+  void dispose() {
+    if (mounted) {
+      streamSub.cancel();
+    }
+    super.dispose();
+  }
 }
 
 final partnerSharedWithProvider =
     StateNotifierProvider<PartnerSharedWithNotifier, List<User>>((ref) {
   return PartnerSharedWithNotifier(
-    ref.watch(dbProvider),
     ref.watch(partnerServiceProvider),
   );
 });
 
 class PartnerSharedByNotifier extends StateNotifier<List<User>> {
-  PartnerSharedByNotifier(Isar db) : super([]) {
-    final query = db.users.filter().isPartnerSharedByEqualTo(true);
-    query.findAll().then((partners) => state = partners);
-    streamSub = query.watch().listen((partners) => state = partners);
-  }
-
+  final PartnerService _partnerService;
   late final StreamSubscription<List<User>> streamSub;
+
+  PartnerSharedByNotifier(this._partnerService) : super([]) {
+    Function eq = const ListEquality<User>().equals;
+    _partnerService.getSharedBy().then((partners) {
+      if (!eq(state, partners)) {
+        state = partners;
+      }
+    }).then((_) {
+      streamSub = _partnerService.watchSharedBy().listen((partners) {
+        if (!eq(state, partners)) {
+          state = partners;
+        }
+      });
+    });
+  }
 
   @override
   void dispose() {
-    streamSub.cancel();
+    if (mounted) {
+      streamSub.cancel();
+    }
     super.dispose();
   }
 }
 
 final partnerSharedByProvider =
     StateNotifierProvider<PartnerSharedByNotifier, List<User>>((ref) {
-  return PartnerSharedByNotifier(ref.watch(dbProvider));
+  return PartnerSharedByNotifier(ref.watch(partnerServiceProvider));
 });
 
 final partnerAvailableProvider =

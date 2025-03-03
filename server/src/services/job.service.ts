@@ -3,19 +3,19 @@ import { snakeCase } from 'lodash';
 import { OnEvent } from 'src/decorators';
 import { mapAsset } from 'src/dtos/asset-response.dto';
 import { AllJobStatusResponseDto, JobCommandDto, JobCreateDto, JobStatusDto } from 'src/dtos/job.dto';
-import { AssetType, ImmichWorker, ManualJobName } from 'src/enum';
-import { ArgOf } from 'src/interfaces/event.interface';
 import {
-  ConcurrentQueueName,
+  AssetType,
+  ImmichWorker,
   JobCommand,
-  JobHandler,
-  JobItem,
   JobName,
   JobStatus,
+  ManualJobName,
   QueueCleanType,
   QueueName,
-} from 'src/interfaces/job.interface';
+} from 'src/enum';
+import { ArgOf, ArgsOf } from 'src/repositories/event.repository';
 import { BaseService } from 'src/services/base.service';
+import { ConcurrentQueueName, JobItem } from 'src/types';
 
 const asJobItem = (dto: JobCreateDto): JobItem => {
   switch (dto.name) {
@@ -31,6 +31,14 @@ const asJobItem = (dto: JobCreateDto): JobItem => {
       return { name: JobName.USER_DELETE_CHECK };
     }
 
+    case ManualJobName.MEMORY_CLEANUP: {
+      return { name: JobName.MEMORIES_CLEANUP };
+    }
+
+    case ManualJobName.MEMORY_CREATE: {
+      return { name: JobName.MEMORIES_CREATE };
+    }
+
     default: {
       throw new BadRequestException('Invalid job name');
     }
@@ -39,19 +47,8 @@ const asJobItem = (dto: JobCreateDto): JobItem => {
 
 @Injectable()
 export class JobService extends BaseService {
-  private isMicroservices = false;
-
-  @OnEvent({ name: 'app.bootstrap' })
-  onBootstrap(app: ArgOf<'app.bootstrap'>) {
-    this.isMicroservices = app === ImmichWorker.MICROSERVICES;
-  }
-
-  @OnEvent({ name: 'config.update', server: true })
-  onConfigUpdate({ newConfig: config, oldConfig }: ArgOf<'config.update'>) {
-    if (!oldConfig || !this.isMicroservices) {
-      return;
-    }
-
+  @OnEvent({ name: 'config.init', workers: [ImmichWorker.MICROSERVICES] })
+  onConfigInit({ newConfig: config }: ArgOf<'config.init'>) {
     this.logger.debug(`Updating queue concurrency settings`);
     for (const queueName of Object.values(QueueName)) {
       let concurrency = 1;
@@ -61,6 +58,11 @@ export class JobService extends BaseService {
       this.logger.debug(`Setting ${queueName} concurrency to ${concurrency}`);
       this.jobRepository.setConcurrency(queueName, concurrency);
     }
+  }
+
+  @OnEvent({ name: 'config.update', server: true, workers: [ImmichWorker.MICROSERVICES] })
+  onConfigUpdate({ newConfig: config }: ArgOf<'config.update'>) {
+    this.onConfigInit({ newConfig: config });
   }
 
   async create(dto: JobCreateDto): Promise<void> {
@@ -168,7 +170,11 @@ export class JobService extends BaseService {
       }
 
       case QueueName.LIBRARY: {
-        return this.jobRepository.queue({ name: JobName.LIBRARY_QUEUE_SYNC_ALL, data: { force } });
+        return this.jobRepository.queue({ name: JobName.LIBRARY_QUEUE_SCAN_ALL, data: { force } });
+      }
+
+      case QueueName.BACKUP_DATABASE: {
+        return this.jobRepository.queue({ name: JobName.BACKUP_DATABASE, data: { force } });
       }
 
       default: {
@@ -177,41 +183,25 @@ export class JobService extends BaseService {
     }
   }
 
-  async init(jobHandlers: Record<JobName, JobHandler>) {
-    const config = await this.getConfig({ withCache: false });
-    for (const queueName of Object.values(QueueName)) {
-      let concurrency = 1;
-
-      if (this.isConcurrentQueue(queueName)) {
-        concurrency = config.job[queueName].concurrency;
+  @OnEvent({ name: 'job.start' })
+  async onJobStart(...[queueName, job]: ArgsOf<'job.start'>) {
+    const queueMetric = `immich.queues.${snakeCase(queueName)}.active`;
+    this.telemetryRepository.jobs.addToGauge(queueMetric, 1);
+    try {
+      const status = await this.jobRepository.run(job);
+      const jobMetric = `immich.jobs.${job.name.replaceAll('-', '_')}.${status}`;
+      this.telemetryRepository.jobs.addToCounter(jobMetric, 1);
+      if (status === JobStatus.SUCCESS || status == JobStatus.SKIPPED) {
+        await this.onDone(job);
       }
-
-      this.logger.debug(`Registering ${queueName} with a concurrency of ${concurrency}`);
-      this.jobRepository.addHandler(queueName, concurrency, async (item: JobItem): Promise<void> => {
-        const { name, data } = item;
-
-        const handler = jobHandlers[name];
-        if (!handler) {
-          this.logger.warn(`Skipping unknown job: "${name}"`);
-          return;
-        }
-
-        const queueMetric = `immich.queues.${snakeCase(queueName)}.active`;
-        this.telemetryRepository.jobs.addToGauge(queueMetric, 1);
-
-        try {
-          const status = await handler(data);
-          const jobMetric = `immich.jobs.${name.replaceAll('-', '_')}.${status}`;
-          this.telemetryRepository.jobs.addToCounter(jobMetric, 1);
-          if (status === JobStatus.SUCCESS || status == JobStatus.SKIPPED) {
-            await this.onDone(item);
-          }
-        } catch (error: Error | any) {
-          this.logger.error(`Unable to run job handler (${queueName}/${name}): ${error}`, error?.stack, data);
-        } finally {
-          this.telemetryRepository.jobs.addToGauge(queueMetric, -1);
-        }
-      });
+    } catch (error: Error | any) {
+      this.logger.error(
+        `Unable to run job handler (${queueName}/${job.name}): ${error}`,
+        error?.stack,
+        JSON.stringify(job.data),
+      );
+    } finally {
+      this.telemetryRepository.jobs.addToGauge(queueMetric, -1);
     }
   }
 
@@ -220,6 +210,7 @@ export class JobService extends BaseService {
       QueueName.FACIAL_RECOGNITION,
       QueueName.STORAGE_TEMPLATE_MIGRATION,
       QueueName.DUPLICATE_DETECTION,
+      QueueName.BACKUP_DATABASE,
     ].includes(name);
   }
 
@@ -228,6 +219,8 @@ export class JobService extends BaseService {
       { name: JobName.ASSET_DELETION_CHECK },
       { name: JobName.USER_DELETE_CHECK },
       { name: JobName.PERSON_CLEANUP },
+      { name: JobName.MEMORIES_CLEANUP },
+      { name: JobName.MEMORIES_CREATE },
       { name: JobName.QUEUE_GENERATE_THUMBNAILS, data: { force: false } },
       { name: JobName.CLEAN_OLD_AUDIT_LOGS },
       { name: JobName.USER_SYNC_USAGE },

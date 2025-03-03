@@ -1,14 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { join } from 'node:path';
 import { StorageCore } from 'src/cores/storage.core';
-import { OnEvent } from 'src/decorators';
-import { StorageFolder, SystemMetadataKey } from 'src/enum';
-import { DatabaseLock } from 'src/interfaces/database.interface';
-import { IDeleteFilesJob, JobStatus } from 'src/interfaces/job.interface';
+import { OnEvent, OnJob } from 'src/decorators';
+import { SystemFlags } from 'src/entities/system-metadata.entity';
+import { DatabaseLock, JobName, JobStatus, QueueName, StorageFolder, SystemMetadataKey } from 'src/enum';
 import { BaseService } from 'src/services/base.service';
-
-export class ImmichStartupError extends Error {}
-export const isStartUpError = (error: unknown): error is ImmichStartupError => error instanceof ImmichStartupError;
+import { JobOf } from 'src/types';
+import { ImmichStartupError } from 'src/utils/misc';
 
 const docsMessage = `Please see https://immich.app/docs/administration/system-integrity#folder-checks for more information.`;
 
@@ -19,25 +17,36 @@ export class StorageService extends BaseService {
     const envData = this.configRepository.getEnv();
 
     await this.databaseRepository.withLock(DatabaseLock.SystemFileMounts, async () => {
-      const flags = (await this.systemMetadataRepository.get(SystemMetadataKey.SYSTEM_FLAGS)) || { mountFiles: false };
-      const enabled = flags.mountFiles ?? false;
+      const flags =
+        (await this.systemMetadataRepository.get(SystemMetadataKey.SYSTEM_FLAGS)) ||
+        ({ mountChecks: {} } as SystemFlags);
 
-      this.logger.log(`Verifying system mount folder checks (enabled=${enabled})`);
+      if (!flags.mountChecks) {
+        flags.mountChecks = {};
+      }
+
+      let updated = false;
+
+      this.logger.log(`Verifying system mount folder checks, current state: ${JSON.stringify(flags)}`);
 
       try {
         // check each folder exists and is writable
         for (const folder of Object.values(StorageFolder)) {
-          if (!enabled) {
+          if (!flags.mountChecks[folder]) {
             this.logger.log(`Writing initial mount file for the ${folder} folder`);
             await this.createMountFile(folder);
           }
 
           await this.verifyReadAccess(folder);
           await this.verifyWriteAccess(folder);
+
+          if (!flags.mountChecks[folder]) {
+            flags.mountChecks[folder] = true;
+            updated = true;
+          }
         }
 
-        if (!flags.mountFiles) {
-          flags.mountFiles = true;
+        if (updated) {
           await this.systemMetadataRepository.set(SystemMetadataKey.SYSTEM_FLAGS, flags);
           this.logger.log('Successfully enabled system mount folders checks');
         }
@@ -45,7 +54,7 @@ export class StorageService extends BaseService {
         this.logger.log('Successfully verified system mount folder checks');
       } catch (error) {
         if (envData.storage.ignoreMountCheckErrors) {
-          this.logger.error(error);
+          this.logger.error(error as Error);
           this.logger.warn('Ignoring mount folder errors');
         } else {
           throw error;
@@ -54,7 +63,8 @@ export class StorageService extends BaseService {
     });
   }
 
-  async handleDeleteFiles(job: IDeleteFilesJob) {
+  @OnJob({ name: JobName.DELETE_FILES, queue: QueueName.BACKGROUND_TASK })
+  async handleDeleteFiles(job: JobOf<JobName.DELETE_FILES>): Promise<JobStatus> {
     const { files } = job;
 
     // TODO: one job per file

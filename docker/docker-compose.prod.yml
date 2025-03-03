@@ -1,3 +1,12 @@
+#
+# WARNING: To install Immich, follow our guide: https://immich.app/docs/install/docker-compose
+#
+# Make sure to use the docker-compose.yml of the current release:
+#
+# https://github.com/immich-app/immich/releases/latest/download/docker-compose.yml
+#
+# The compose file on main may not be compatible with the latest release.
+
 name: immich-prod
 
 services:
@@ -47,7 +56,7 @@ services:
 
   redis:
     container_name: immich_redis
-    image: redis:6.2-alpine@sha256:2ba50e1ac3a0ea17b736ce9db2b0a9f6f8b85d4c27d5f5accc6a416d8f42c6d5
+    image: redis:6.2-alpine@sha256:148bb5411c184abd288d9aaed139c98123eeb8824c5d3fce03cf721db58066d8
     healthcheck:
       test: redis-cli ping || exit 1
     restart: always
@@ -67,34 +76,31 @@ services:
     ports:
       - 5432:5432
     healthcheck:
-      test: pg_isready --dbname='${DB_DATABASE_NAME}' --username='${DB_USERNAME}' || exit 1; Chksum="$$(psql --dbname='${DB_DATABASE_NAME}' --username='${DB_USERNAME}' --tuples-only --no-align --command='SELECT COALESCE(SUM(checksum_failures), 0) FROM pg_stat_database')"; echo "checksum failure count is $$Chksum"; [ "$$Chksum" = '0' ] || exit 1
+      test: >-
+        pg_isready --dbname="$${POSTGRES_DB}" --username="$${POSTGRES_USER}" || exit 1;
+        Chksum="$$(psql --dbname="$${POSTGRES_DB}" --username="$${POSTGRES_USER}" --tuples-only --no-align
+        --command='SELECT COALESCE(SUM(checksum_failures), 0) FROM pg_stat_database')";
+        echo "checksum failure count is $$Chksum";
+        [ "$$Chksum" = '0' ] || exit 1
       interval: 5m
       start_interval: 30s
       start_period: 5m
-    command:
-      [
-        'postgres',
-        '-c',
-        'shared_preload_libraries=vectors.so',
-        '-c',
-        'search_path="$$user", public, vectors',
-        '-c',
-        'logging_collector=on',
-        '-c',
-        'max_wal_size=2GB',
-        '-c',
-        'shared_buffers=512MB',
-        '-c',
-        'wal_compression=on',
-      ]
+    command: >-
+      postgres
+      -c shared_preload_libraries=vectors.so
+      -c 'search_path="$$user", public, vectors'
+      -c logging_collector=on
+      -c max_wal_size=2GB
+      -c shared_buffers=512MB
+      -c wal_compression=on
     restart: always
 
-  # set IMMICH_METRICS=true in .env to enable metrics
+  # set IMMICH_TELEMETRY_INCLUDE=all in .env to enable metrics
   immich-prometheus:
     container_name: immich_prometheus
     ports:
       - 9090:9090
-    image: prom/prometheus@sha256:378f4e03703557d1c6419e6caccf922f96e6d88a530f7431d66a4c4f4b1000fe
+    image: prom/prometheus@sha256:5888c188cf09e3f7eebc97369c3b2ce713e844cdbd88ccf36f5047c958aea120
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
@@ -106,7 +112,7 @@ services:
     command: ['./run.sh', '-disable-reporting']
     ports:
       - 3000:3000
-    image: grafana/grafana:11.2.2-ubuntu@sha256:2bef00403c18d27919ff19d64fd6253fa713b3880304e92f69109e14221ac843
+    image: grafana/grafana:11.5.1-ubuntu@sha256:9a4ab78cec1a2ec7d1ca5dfd5aacec6412706a1bc9e971fc7184e2f6696a63f5
     volumes:
       - grafana-data:/var/lib/grafana
 

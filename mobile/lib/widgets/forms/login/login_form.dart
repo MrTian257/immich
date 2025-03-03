@@ -10,10 +10,7 @@ import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/providers/oauth.provider.dart';
 import 'package:immich_mobile/providers/gallery_permission.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
-import 'package:immich_mobile/entities/store.entity.dart';
-import 'package:immich_mobile/providers/api.provider.dart';
-import 'package:immich_mobile/providers/asset.provider.dart';
-import 'package:immich_mobile/providers/authentication.provider.dart';
+import 'package:immich_mobile/providers/auth.provider.dart';
 import 'package:immich_mobile/providers/backup/backup.provider.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/utils/provider_utils.dart';
@@ -40,13 +37,12 @@ class LoginForm extends HookConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final usernameController =
+    final emailController =
         useTextEditingController.fromValue(TextEditingValue.empty);
     final passwordController =
         useTextEditingController.fromValue(TextEditingValue.empty);
     final serverEndpointController =
         useTextEditingController.fromValue(TextEditingValue.empty);
-    final apiService = ref.watch(apiServiceProvider);
     final emailFocusNode = useFocusNode();
     final passwordFocusNode = useFocusNode();
     final serverEndpointFocusNode = useFocusNode();
@@ -85,7 +81,7 @@ class LoginForm extends HookConsumerWidget {
 
     /// Fetch the server login credential and enables oAuth login if necessary
     /// Returns true if successful, false otherwise
-    Future<bool> getServerLoginCredential() async {
+    Future<void> getServerAuthSettings() async {
       final serverUrl = sanitizeUrl(serverEndpointController.text);
 
       // Guard empty URL
@@ -95,13 +91,12 @@ class LoginForm extends HookConsumerWidget {
           msg: "login_form_server_empty".tr(),
           toastType: ToastType.error,
         );
-
-        return false;
       }
 
       try {
         isLoadingServer.value = true;
-        final endpoint = await apiService.resolveAndSetEndpoint(serverUrl);
+        final endpoint =
+            await ref.read(authProvider.notifier).validateServerUrl(serverUrl);
 
         // Fetch and load server config and features
         await ref.read(serverInfoProvider.notifier).getServerInfo();
@@ -127,7 +122,6 @@ class LoginForm extends HookConsumerWidget {
         isOauthEnable.value = false;
         isPasswordLoginEnable.value = true;
         isLoadingServer.value = false;
-        return false;
       } on HandshakeException {
         ImmichToast.show(
           context: context,
@@ -138,7 +132,6 @@ class LoginForm extends HookConsumerWidget {
         isOauthEnable.value = false;
         isPasswordLoginEnable.value = true;
         isLoadingServer.value = false;
-        return false;
       } catch (e) {
         ImmichToast.show(
           context: context,
@@ -149,16 +142,14 @@ class LoginForm extends HookConsumerWidget {
         isOauthEnable.value = false;
         isPasswordLoginEnable.value = true;
         isLoadingServer.value = false;
-        return false;
       }
 
       isLoadingServer.value = false;
-      return true;
     }
 
     useEffect(
       () {
-        final serverUrl = Store.tryGet(StoreKey.serverUrl);
+        final serverUrl = getServerUrl();
         if (serverUrl != null) {
           serverEndpointController.text = serverUrl;
         }
@@ -168,67 +159,50 @@ class LoginForm extends HookConsumerWidget {
     );
 
     populateTestLoginInfo() {
-      usernameController.text = 'demo@immich.app';
+      emailController.text = 'demo@immich.app';
       passwordController.text = 'demo';
       serverEndpointController.text = 'https://demo.immich.app';
     }
 
     populateTestLoginInfo1() {
-      usernameController.text = 'testuser@email.com';
+      emailController.text = 'testuser@email.com';
       passwordController.text = 'password';
       serverEndpointController.text = 'http://10.1.15.216:2283/api';
     }
 
     login() async {
       TextInput.finishAutofillContext();
-      // Start loading
-      isLoading.value = true;
 
-      // This will remove current cache asset state of previous user login.
-      ref.read(assetProvider.notifier).clearAllAsset();
+      isLoading.value = true;
 
       // Invalidate all api repository provider instance to take into account new access token
       invalidateAllApiRepositoryProviders(ref);
 
       try {
-        final isAuthenticated =
-            await ref.read(authenticationProvider.notifier).login(
-                  usernameController.text,
-                  passwordController.text,
-                  sanitizeUrl(serverEndpointController.text),
-                );
-        if (isAuthenticated) {
-          // Resume backup (if enable) then navigate
-          if (ref.read(authenticationProvider).shouldChangePassword &&
-              !ref.read(authenticationProvider).isAdmin) {
-            context.pushRoute(const ChangePasswordRoute());
-          } else {
-            final hasPermission = await ref
-                .read(galleryPermissionNotifier.notifier)
-                .hasPermission;
-            if (hasPermission) {
-              // Don't resume the backup until we have gallery permission
-              ref.read(backupProvider.notifier).resumeBackup();
-            }
-            context.replaceRoute(const TabControllerRoute());
-          }
+        final result = await ref.read(authProvider.notifier).login(
+              emailController.text,
+              passwordController.text,
+            );
+
+        if (result.shouldChangePassword && !result.isAdmin) {
+          context.pushRoute(const ChangePasswordRoute());
         } else {
-          ImmichToast.show(
-            context: context,
-            msg: "login_form_failed_login".tr(),
-            toastType: ToastType.error,
-            gravity: ToastGravity.TOP,
-          );
+          context.replaceRoute(const TabControllerRoute());
         }
+      } catch (error) {
+        ImmichToast.show(
+          context: context,
+          msg: "login_form_failed_login".tr(),
+          toastType: ToastType.error,
+          gravity: ToastGravity.TOP,
+        );
       } finally {
-        // Make sure we stop loading
         isLoading.value = false;
       }
     }
 
     oAuthLogin() async {
       var oAuthService = ref.watch(oAuthServiceProvider);
-      ref.watch(assetProvider.notifier).clearAllAsset();
       String? oAuthServerUrl;
 
       try {
@@ -262,11 +236,8 @@ class LoginForm extends HookConsumerWidget {
             "Finished OAuth login with response: ${loginResponseDto.userEmail}",
           );
 
-          final isSuccess = await ref
-              .watch(authenticationProvider.notifier)
-              .setSuccessLoginInfo(
+          final isSuccess = await ref.watch(authProvider.notifier).saveAuthInfo(
                 accessToken: loginResponseDto.accessToken,
-                serverUrl: sanitizeUrl(serverEndpointController.text),
               );
 
           if (isSuccess) {
@@ -309,7 +280,7 @@ class LoginForm extends HookConsumerWidget {
           ServerEndpointInput(
             controller: serverEndpointController,
             focusNode: serverEndpointFocusNode,
-            onSubmit: getServerLoginCredential,
+            onSubmit: getServerAuthSettings,
           ),
           const SizedBox(height: 18),
           Row(
@@ -344,7 +315,7 @@ class LoginForm extends HookConsumerWidget {
                     ),
                   ),
                   onPressed:
-                      isLoadingServer.value ? null : getServerLoginCredential,
+                      isLoadingServer.value ? null : getServerAuthSettings,
                   icon: const Icon(Icons.arrow_forward_rounded),
                   label: const Text(
                     'login_form_next_button',
@@ -402,7 +373,7 @@ class LoginForm extends HookConsumerWidget {
             if (isPasswordLoginEnable.value) ...[
               const SizedBox(height: 18),
               EmailInput(
-                controller: usernameController,
+                controller: emailController,
                 focusNode: emailFocusNode,
                 onSubmit: passwordFocusNode.requestFocus,
               ),

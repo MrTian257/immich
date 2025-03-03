@@ -200,21 +200,34 @@ class MultiselectGrid extends HookConsumerWidget {
       }
     }
 
-    void onDeleteLocal(bool onlyBackedUp) async {
+    void onDeleteLocal(bool isMergedAsset) async {
       processing.value = true;
       try {
-        final localIds = selection.value.where((a) => a.isLocal).toList();
+        final localAssets = selection.value.where((a) => a.isLocal).toList();
+
+        final toDelete = isMergedAsset
+            ? localAssets.where((e) => e.storage == AssetState.merged)
+            : localAssets;
+
+        if (toDelete.isEmpty) {
+          return;
+        }
 
         final isDeleted = await ref
             .read(assetProvider.notifier)
-            .deleteLocalOnlyAssets(localIds, onlyBackedUp: onlyBackedUp);
+            .deleteLocalAssets(toDelete.toList());
+
         if (isDeleted) {
+          final deletedCount =
+              localAssets.where((e) => !isMergedAsset || e.isRemote).length;
+
           ImmichToast.show(
             context: context,
             msg: 'assets_removed_permanently_from_device'
-                .tr(args: ["${localIds.length}"]),
+                .tr(args: ["$deletedCount"]),
             gravity: ToastGravity.BOTTOM,
           );
+
           selectionEnabledHook.value = false;
         }
       } finally {
@@ -222,7 +235,7 @@ class MultiselectGrid extends HookConsumerWidget {
       }
     }
 
-    void onDeleteRemote([bool force = false]) async {
+    void onDeleteRemote([bool shouldDeletePermanently = false]) async {
       processing.value = true;
       try {
         final toDelete = ownedRemoteSelection(
@@ -230,13 +243,15 @@ class MultiselectGrid extends HookConsumerWidget {
           ownerErrorMessage: 'home_page_delete_err_partner'.tr(),
         ).toList();
 
-        final isDeleted = await ref
-            .read(assetProvider.notifier)
-            .deleteRemoteOnlyAssets(toDelete, force: force);
+        final isDeleted =
+            await ref.read(assetProvider.notifier).deleteRemoteAssets(
+                  toDelete,
+                  shouldDeletePermanently: shouldDeletePermanently,
+                );
         if (isDeleted) {
           ImmichToast.show(
             context: context,
-            msg: force
+            msg: shouldDeletePermanently
                 ? 'assets_deleted_permanently_from_server'
                     .tr(args: ["${toDelete.length}"])
                 : 'assets_trashed_from_server'.tr(args: ["${toDelete.length}"]),
@@ -421,6 +436,7 @@ class MultiselectGrid extends HookConsumerWidget {
               ),
           if (selectionEnabledHook.value)
             ControlBottomAppBar(
+              key: const ValueKey("controlBottomAppBar"),
               onShare: onShareAssets,
               onFavorite: favoriteEnabled ? onFavoriteAssets : null,
               onArchive: archiveEnabled ? onArchiveAsset : null,

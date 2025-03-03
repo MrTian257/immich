@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:immich_mobile/domain/models/store.model.dart';
+import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/theme_extensions.dart';
+import 'package:immich_mobile/providers/auth.provider.dart';
 import 'package:immich_mobile/providers/upload_profile_image.provider.dart';
-import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
-import 'package:immich_mobile/widgets/common/user_circle_avatar.dart';
-import 'package:immich_mobile/models/authentication/authentication_state.model.dart';
-import 'package:immich_mobile/providers/authentication.provider.dart';
 import 'package:immich_mobile/widgets/common/immich_loading_indicator.dart';
+import 'package:immich_mobile/widgets/common/user_circle_avatar.dart';
 
 class AppBarProfileInfoBox extends HookConsumerWidget {
   const AppBarProfileInfoBox({
@@ -18,7 +18,7 @@ class AppBarProfileInfoBox extends HookConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    AuthenticationState authState = ref.watch(authenticationProvider);
+    final authState = ref.watch(authProvider);
     final uploadProfileImageStatus =
         ref.watch(uploadProfileImageProvider).status;
     final user = Store.tryGet(StoreKey.currentUser);
@@ -63,12 +63,12 @@ class AppBarProfileInfoBox extends HookConsumerWidget {
         if (success) {
           final profileImagePath =
               ref.read(uploadProfileImageProvider).profileImagePath;
-          ref.watch(authenticationProvider.notifier).updateUserProfileImagePath(
+          ref.watch(authProvider.notifier).updateUserProfileImagePath(
                 profileImagePath,
               );
           if (user != null) {
             user.profileImagePath = profileImagePath;
-            Store.put(StoreKey.currentUser, user);
+            await Store.put(StoreKey.currentUser, user);
             ref.read(currentUserProvider.notifier).refresh();
           }
         }

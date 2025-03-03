@@ -156,7 +156,7 @@ interface UpdateStackAssets {
   values: string[];
 }
 
-export const photoViewer = writable<HTMLImageElement | null>(null);
+export const photoViewerImgElement = writable<HTMLImageElement | null>(null);
 
 type PendingChange = AddAsset | UpdateAsset | DeleteAsset | TrashAssets | UpdateStackAssets;
 
@@ -398,7 +398,9 @@ export class AssetStore {
   }
 
   async updateOptions(options: AssetStoreOptions) {
-    if (!this.initialized) {
+    // Make sure to re-initialize if the personId changes
+    const needsReinitializing = this.options.personId !== options.personId;
+    if (!this.initialized && !needsReinitializing) {
       this.setOptions(options);
       return;
     }
