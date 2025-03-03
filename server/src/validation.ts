@@ -12,19 +12,24 @@ import {
   IsArray,
   IsBoolean,
   IsDate,
+  IsHexColor,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
+  Validate,
   ValidateBy,
   ValidateIf,
   ValidationOptions,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
   buildMessage,
   isDateString,
 } from 'class-validator';
 import { CronJob } from 'cron';
 import { DateTime } from 'luxon';
 import sanitize from 'sanitize-filename';
+import { isIP, isIPRange } from 'validator';
 
 @Injectable()
 export class ParseMeUUIDPipe extends ParseUUIDPipe {
@@ -93,6 +98,15 @@ export function Optional({ nullable, emptyToNull, ...validationOptions }: Option
   return applyDecorators(...decorators);
 }
 
+export const ValidateHexColor = () => {
+  const decorators = [
+    IsHexColor(),
+    Transform(({ value }) => (typeof value === 'string' && value[0] !== '#' ? `#${value}` : value)),
+  ];
+
+  return applyDecorators(...decorators);
+};
+
 type UUIDOptions = { optional?: boolean; each?: boolean; nullable?: boolean };
 export const ValidateUUID = (options?: UUIDOptions) => {
   const { optional, each, nullable } = { optional: false, each: false, nullable: false, ...options };
@@ -155,15 +169,19 @@ export const ValidateBoolean = (options?: BooleanOptions) => {
   return applyDecorators(...decorators);
 };
 
-export function validateCronExpression(expression: string) {
-  try {
-    new CronJob(expression, () => {});
-  } catch {
-    return false;
+@ValidatorConstraint({ name: 'cronValidator' })
+class CronValidator implements ValidatorConstraintInterface {
+  validate(expression: string): boolean {
+    try {
+      new CronJob(expression, () => {});
+      return true;
+    } catch {
+      return false;
+    }
   }
-
-  return true;
 }
+
+export const IsCronExpression = () => Validate(CronValidator, { message: 'Invalid cron expression' });
 
 type IValue = { value: unknown };
 
@@ -221,6 +239,35 @@ export function MaxDateString(
         },
         defaultMessage: buildMessage(
           (eachPrefix) => 'maximal allowed date for ' + eachPrefix + '$property is $constraint1',
+          validationOptions,
+        ),
+      },
+    },
+    validationOptions,
+  );
+}
+
+type IsIPRangeOptions = { requireCIDR?: boolean };
+export function IsIPRange(options: IsIPRangeOptions, validationOptions?: ValidationOptions): PropertyDecorator {
+  const { requireCIDR } = { requireCIDR: true, ...options };
+
+  return ValidateBy(
+    {
+      name: 'isIPRange',
+      validator: {
+        validate: (value): boolean => {
+          if (isIPRange(value)) {
+            return true;
+          }
+
+          if (!requireCIDR && isIP(value)) {
+            return true;
+          }
+
+          return false;
+        },
+        defaultMessage: buildMessage(
+          (eachPrefix) => eachPrefix + '$property must be an ip address, or ip address range',
           validationOptions,
         ),
       },

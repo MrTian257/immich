@@ -1,19 +1,18 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Inject, Module, OnModuleDestroy, OnModuleInit, ValidationPipe } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE, ModuleRef } from '@nestjs/core';
 import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { PostgresJSDialect } from 'kysely-postgres-js';
 import { ClsModule } from 'nestjs-cls';
+import { KyselyModule } from 'nestjs-kysely';
 import { OpenTelemetryModule } from 'nestjs-otel';
+import postgres from 'postgres';
 import { commands } from 'src/commands';
-import { clsConfig, immichAppConfig } from 'src/config';
+import { IWorker } from 'src/constants';
 import { controllers } from 'src/controllers';
 import { entities } from 'src/entities';
 import { ImmichWorker } from 'src/enum';
-import { IEventRepository } from 'src/interfaces/event.interface';
-import { ILoggerRepository } from 'src/interfaces/logger.interface';
-import { ITelemetryRepository } from 'src/interfaces/telemetry.interface';
 import { AuthGuard } from 'src/middleware/auth.guard';
 import { ErrorInterceptor } from 'src/middleware/error.interceptor';
 import { FileUploadInterceptor } from 'src/middleware/file-upload.interceptor';
@@ -21,11 +20,16 @@ import { GlobalExceptionFilter } from 'src/middleware/global-exception.filter';
 import { LoggingInterceptor } from 'src/middleware/logging.interceptor';
 import { repositories } from 'src/repositories';
 import { ConfigRepository } from 'src/repositories/config.repository';
-import { teardownTelemetry } from 'src/repositories/telemetry.repository';
+import { EventRepository } from 'src/repositories/event.repository';
+import { JobRepository } from 'src/repositories/job.repository';
+import { LoggingRepository } from 'src/repositories/logging.repository';
+import { teardownTelemetry, TelemetryRepository } from 'src/repositories/telemetry.repository';
 import { services } from 'src/services';
+import { AuthService } from 'src/services/auth.service';
+import { CliService } from 'src/services/cli.service';
 import { DatabaseService } from 'src/services/database.service';
 
-const common = [...services, ...repositories];
+const common = [...repositories, ...services, GlobalExceptionFilter];
 
 const middleware = [
   FileUploadInterceptor,
@@ -37,19 +41,18 @@ const middleware = [
 ];
 
 const configRepository = new ConfigRepository();
-const { bull, database, otel } = configRepository.getEnv();
+const { bull, cls, database, otel } = configRepository.getEnv();
 
 const imports = [
   BullModule.forRoot(bull.config),
   BullModule.registerQueue(...bull.queues),
-  ClsModule.forRoot(clsConfig),
-  ConfigModule.forRoot(immichAppConfig),
+  ClsModule.forRoot(cls.config),
   OpenTelemetryModule.forRoot(otel),
   TypeOrmModule.forRootAsync({
     inject: [ModuleRef],
     useFactory: (moduleRef: ModuleRef) => {
       return {
-        ...database.config,
+        ...database.config.typeorm,
         poolErrorHandler: (error) => {
           moduleRef.get(DatabaseService, { strict: false }).handleConnectionError(error);
         },
@@ -57,31 +60,55 @@ const imports = [
     },
   }),
   TypeOrmModule.forFeature(entities),
+  KyselyModule.forRoot({
+    dialect: new PostgresJSDialect({ postgres: postgres(database.config.kysely) }),
+    log(event) {
+      if (event.level === 'error') {
+        console.error('Query failed :', {
+          durationMs: event.queryDurationMillis,
+          error: event.error,
+          sql: event.query.sql,
+          params: event.query.parameters,
+        });
+      }
+    },
+  }),
 ];
 
-abstract class BaseModule implements OnModuleInit, OnModuleDestroy {
-  private get worker() {
-    return this.getWorker();
-  }
-
+class BaseModule implements OnModuleInit, OnModuleDestroy {
   constructor(
-    @Inject(ILoggerRepository) logger: ILoggerRepository,
-    @Inject(IEventRepository) private eventRepository: IEventRepository,
-    @Inject(ITelemetryRepository) private telemetryRepository: ITelemetryRepository,
+    @Inject(IWorker) private worker: ImmichWorker,
+    logger: LoggingRepository,
+    private eventRepository: EventRepository,
+    private jobRepository: JobRepository,
+    private telemetryRepository: TelemetryRepository,
+    private authService: AuthService,
   ) {
     logger.setAppName(this.worker);
   }
 
-  abstract getWorker(): ImmichWorker;
-
   async onModuleInit() {
-    this.telemetryRepository.setup({ repositories: repositories.map(({ useClass }) => useClass) });
+    this.telemetryRepository.setup({ repositories });
+
+    this.jobRepository.setup({ services });
+    if (this.worker === ImmichWorker.MICROSERVICES) {
+      this.jobRepository.startWorkers();
+    }
+
+    this.eventRepository.setAuthFn(async (client) =>
+      this.authService.authenticate({
+        headers: client.request.headers,
+        queryParams: {},
+        metadata: { adminRoute: false, sharedLinkRoute: false, uri: '/api/socket.io' },
+      }),
+    );
+
     this.eventRepository.setup({ services });
-    await this.eventRepository.emit('app.bootstrap', this.worker);
+    await this.eventRepository.emit('app.bootstrap');
   }
 
   async onModuleDestroy() {
-    await this.eventRepository.emit('app.shutdown', this.worker);
+    await this.eventRepository.emit('app.shutdown');
     await teardownTelemetry();
   }
 }
@@ -89,26 +116,24 @@ abstract class BaseModule implements OnModuleInit, OnModuleDestroy {
 @Module({
   imports: [...imports, ScheduleModule.forRoot()],
   controllers: [...controllers],
-  providers: [...common, ...middleware],
+  providers: [...common, ...middleware, { provide: IWorker, useValue: ImmichWorker.API }],
 })
-export class ApiModule extends BaseModule {
-  getWorker() {
-    return ImmichWorker.API;
-  }
-}
+export class ApiModule extends BaseModule {}
 
 @Module({
   imports: [...imports],
-  providers: [...common, SchedulerRegistry],
+  providers: [...common, { provide: IWorker, useValue: ImmichWorker.MICROSERVICES }, SchedulerRegistry],
 })
-export class MicroservicesModule extends BaseModule {
-  getWorker() {
-    return ImmichWorker.MICROSERVICES;
-  }
-}
+export class MicroservicesModule extends BaseModule {}
 
 @Module({
   imports: [...imports],
   providers: [...common, ...commands, SchedulerRegistry],
 })
-export class ImmichAdminModule {}
+export class ImmichAdminModule implements OnModuleDestroy {
+  constructor(private service: CliService) {}
+
+  async onModuleDestroy() {
+    await this.service.cleanup();
+  }
+}

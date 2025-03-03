@@ -58,7 +58,7 @@ If your photos are on a network drive, automatic file watching likely won't work
 
 #### Troubleshooting
 
-If you encounter an `ENOSPC` error, you need to increase your file watcher limit. In sysctl, this key is called `fs.inotify.max_user_watched` and has a default value of 8192. Increase this number to a suitable value greater than the number of files you will be watching. Note that Immich has to watch all files in your import paths including any ignored files.
+If you encounter an `ENOSPC` error, you need to increase your file watcher limit. In sysctl, this key is called `fs.inotify.max_user_watches` and has a default value of 8192. Increase this number to a suitable value greater than the number of files you will be watching. Note that Immich has to watch all files in your import paths including any ignored files.
 
 ```
 ERROR [LibraryService] Library watcher for library c69faf55-f96d-4aa0-b83b-2d80cbc27d98 encountered error: Error: ENOSPC: System limit for number of file watchers reached, watch '/media/photo.jpg'
@@ -68,7 +68,7 @@ In rare cases, the library watcher can hang, preventing Immich from starting up.
 
 ### Nightly job
 
-There is an automatic scan job that is scheduled to run once a day. This job also cleans up any libraries stuck in deletion.
+There is an automatic scan job that is scheduled to run once a day. This job also cleans up any libraries stuck in deletion. It is possible to trigger the cleanup by clicking "Scan all libraries" in the library managment page.
 
 ## Usage
 
@@ -111,11 +111,10 @@ These actions must be performed by the Immich administrator.
 - Click on Administration -> Libraries
 - Click on Create External Library
 - Select which user owns the library, this can not be changed later
+- Enter `/mnt/media/christmas-trip` then click Add
+- Click on Save
 - Click the drop-down menu on the newly created library
 - Click on Rename Library and rename it to "Christmas Trip"
-- Click Edit Import Paths
-- Click on Add Path
-- Enter `/mnt/media/christmas-trip` then click Add
 
 NOTE: We have to use the `/mnt/media/christmas-trip` path and not the `/mnt/nas/christmas-trip` path since all paths have to be what the Docker containers see.
 
@@ -149,6 +148,16 @@ If you get an error here, please rename the other external library to something 
 
 Within seconds, the assets from the old-pics and videos folders should show up in the main timeline.
 
+### Folder view
+
+Folder view provides an additional view besides the timeline that is similar to a file explorer. It allows you to navigate through the folders and files in the library. This feature is handy for a highly curated and customized external library or a nicely configured storage template.
+
+You can enable this feature under [`Account Settings > Features > Folder View`](https://my.immich.app/user-settings?isOpen=feature+folders)
+
+The UI is currently only available for the web; mobile will come in a subsequent release.
+
+<img src={require('./img/folder-view-1.webp').default} width="100%" title='Folder-view' />
+
 ### Set Custom Scan Interval
 
 :::note
@@ -158,4 +167,4 @@ Only an admin can do this.
 You can define a custom interval for the trigger external library rescan under Administration -> Settings -> Library.  
 You can set the scanning interval using the preset or cron format. For more information you can refer to [Crontab Guru](https://crontab.guru/).
 
-<img src={require('./img/library-custom-scan-interval.png').default} width="75%" title='Set custom scan interval for external library' />
+<img src={require('./img/library-custom-scan-interval.webp').default} width="75%" title='Set custom scan interval for external library' />

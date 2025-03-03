@@ -10,12 +10,20 @@
   import FullScreenModal from '$lib/components/shared-components/full-screen-modal.svelte';
   import { t } from 'svelte-i18n';
 
-  export let asset: AssetResponseDto;
-  export let onClose: () => void;
+  interface Props {
+    asset: AssetResponseDto;
+    onClose: () => void;
+  }
 
-  let imgElement: HTMLDivElement;
+  let { asset, onClose }: Props = $props();
+
+  let imgElement: HTMLDivElement | undefined = $state();
 
   onMount(() => {
+    if (!imgElement) {
+      return;
+    }
+
     imgElement.style.width = '100%';
   });
 
@@ -45,8 +53,18 @@
   };
 
   const handleSetProfilePicture = async () => {
+    if (!imgElement) {
+      return;
+    }
+
     try {
-      const blob = await domtoimage.toBlob(imgElement);
+      const imgElementHeight = imgElement.offsetHeight;
+      const imgElementWidth = imgElement.offsetWidth;
+      const blob = await domtoimage.toBlob(imgElement, {
+        width: imgElementWidth,
+        height: imgElementHeight,
+      });
+
       if (await hasTransparentPixels(blob)) {
         notificationController.show({
           type: NotificationType.Error,
@@ -79,7 +97,8 @@
       <PhotoViewer bind:element={imgElement} {asset} />
     </div>
   </div>
-  <svelte:fragment slot="sticky-bottom">
-    <Button fullwidth on:click={handleSetProfilePicture}>{$t('set_as_profile_picture')}</Button>
-  </svelte:fragment>
+
+  {#snippet stickyBottom()}
+    <Button fullwidth onclick={handleSetProfilePicture}>{$t('set_as_profile_picture')}</Button>
+  {/snippet}
 </FullScreenModal>

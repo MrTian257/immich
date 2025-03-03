@@ -14,22 +14,26 @@
   import SettingAccordion from '$lib/components/shared-components/settings/setting-accordion.svelte';
 
   // Folders
-  let foldersEnabled = $preferences?.folders?.enabled ?? false;
-  let foldersSidebar = $preferences?.folders?.sidebarWeb ?? false;
+  let foldersEnabled = $state($preferences?.folders?.enabled ?? false);
+  let foldersSidebar = $state($preferences?.folders?.sidebarWeb ?? false);
 
   // Memories
-  let memoriesEnabled = $preferences?.memories?.enabled ?? true;
+  let memoriesEnabled = $state($preferences?.memories?.enabled ?? true);
 
   // People
-  let peopleEnabled = $preferences?.people?.enabled ?? false;
-  let peopleSidebar = $preferences?.people?.sidebarWeb ?? false;
+  let peopleEnabled = $state($preferences?.people?.enabled ?? false);
+  let peopleSidebar = $state($preferences?.people?.sidebarWeb ?? false);
 
   // Ratings
-  let ratingsEnabled = $preferences?.ratings?.enabled ?? false;
+  let ratingsEnabled = $state($preferences?.ratings?.enabled ?? false);
+
+  // Shared links
+  let sharedLinksEnabled = $state($preferences?.sharedLinks?.enabled ?? true);
+  let sharedLinkSidebar = $state($preferences?.sharedLinks?.sidebarWeb ?? false);
 
   // Tags
-  let tagsEnabled = $preferences?.tags?.enabled ?? false;
-  let tagsSidebar = $preferences?.tags?.sidebarWeb ?? false;
+  let tagsEnabled = $state($preferences?.tags?.enabled ?? false);
+  let tagsSidebar = $state($preferences?.tags?.sidebarWeb ?? false);
 
   const handleSave = async () => {
     try {
@@ -39,6 +43,7 @@
           memories: { enabled: memoriesEnabled },
           people: { enabled: peopleEnabled, sidebarWeb: peopleSidebar },
           ratings: { enabled: ratingsEnabled },
+          sharedLinks: { enabled: sharedLinksEnabled, sidebarWeb: sharedLinkSidebar },
           tags: { enabled: tagsEnabled, sidebarWeb: tagsSidebar },
         },
       });
@@ -50,11 +55,15 @@
       handleError(error, $t('errors.unable_to_update_settings'));
     }
   };
+
+  const onsubmit = (event: Event) => {
+    event.preventDefault();
+  };
 </script>
 
 <section class="my-4">
   <div in:fade={{ duration: 500 }}>
-    <form autocomplete="off" on:submit|preventDefault>
+    <form autocomplete="off" {onsubmit}>
       <div class="ml-4 mt-4 flex flex-col">
         <SettingAccordion key="folders" title={$t('folders')} subtitle={$t('folders_feature_description')}>
           <div class="ml-4 mt-6">
@@ -100,6 +109,21 @@
           </div>
         </SettingAccordion>
 
+        <SettingAccordion key="shared-links" title={$t('shared_links')} subtitle={$t('shared_links_description')}>
+          <div class="ml-4 mt-6">
+            <SettingSwitch title={$t('enable')} bind:checked={sharedLinksEnabled} />
+          </div>
+          {#if sharedLinksEnabled}
+            <div class="ml-4 mt-6">
+              <SettingSwitch
+                title={$t('sidebar')}
+                subtitle={$t('sidebar_display_description')}
+                bind:checked={sharedLinkSidebar}
+              />
+            </div>
+          {/if}
+        </SettingAccordion>
+
         <SettingAccordion key="tags" title={$t('tags')} subtitle={$t('tag_feature_description')}>
           <div class="ml-4 mt-6">
             <SettingSwitch title={$t('enable')} bind:checked={tagsEnabled} />
@@ -116,7 +140,7 @@
         </SettingAccordion>
 
         <div class="flex justify-end">
-          <Button type="submit" size="sm" on:click={() => handleSave()}>{$t('save')}</Button>
+          <Button type="submit" size="sm" onclick={() => handleSave()}>{$t('save')}</Button>
         </div>
       </div>
     </form>

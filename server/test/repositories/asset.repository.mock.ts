@@ -1,7 +1,8 @@
-import { IAssetRepository } from 'src/interfaces/asset.interface';
+import { AssetRepository } from 'src/repositories/asset.repository';
+import { RepositoryInterface } from 'src/types';
 import { Mocked, vitest } from 'vitest';
 
-export const newAssetRepositoryMock = (): Mocked<IAssetRepository> => {
+export const newAssetRepositoryMock = (): Mocked<RepositoryInterface<AssetRepository>> => {
   return {
     create: vitest.fn(),
     upsertExif: vitest.fn(),
@@ -33,7 +34,6 @@ export const newAssetRepositoryMock = (): Mocked<IAssetRepository> => {
     getTimeBucket: vitest.fn(),
     getTimeBuckets: vitest.fn(),
     getAssetIdByCity: vitest.fn(),
-    getAssetIdByTag: vitest.fn(),
     getAllForUserFullSync: vitest.fn(),
     getChangedDeltaSync: vitest.fn(),
     getDuplicates: vitest.fn(),

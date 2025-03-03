@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { shortcut } from '$lib/actions/shortcut';
   import type { OnAction } from '$lib/components/asset-viewer/actions/action';
-  import AlbumSelectionModal from '$lib/components/shared-components/album-selection-modal.svelte';
+  import AlbumSelectionModal from '$lib/components/shared-components/album-selection/album-selection-modal.svelte';
   import MenuOption from '$lib/components/shared-components/context-menu/menu-option.svelte';
   import Portal from '$lib/components/shared-components/portal/portal.svelte';
   import { AssetAction } from '$lib/constants';
@@ -9,11 +10,15 @@
   import { mdiImageAlbum, mdiShareVariantOutline } from '@mdi/js';
   import { t } from 'svelte-i18n';
 
-  export let asset: AssetResponseDto;
-  export let onAction: OnAction;
-  export let shared = false;
+  interface Props {
+    asset: AssetResponseDto;
+    onAction: OnAction;
+    shared?: boolean;
+  }
 
-  let showSelectionModal = false;
+  let { asset, onAction, shared = false }: Props = $props();
+
+  let showSelectionModal = $state(false);
 
   const handleAddToNewAlbum = async (albumName: string) => {
     showSelectionModal = false;
@@ -29,6 +34,10 @@
     onAction({ type: AssetAction.ADD_TO_ALBUM, asset, album });
   };
 </script>
+
+<svelte:window
+  use:shortcut={{ shortcut: { key: 'l', shift: shared }, onShortcut: () => (showSelectionModal = true) }}
+/>
 
 <MenuOption
   icon={shared ? mdiShareVariantOutline : mdiImageAlbum}

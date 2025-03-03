@@ -4,9 +4,13 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:immich_mobile/domain/services/store.service.dart';
+import 'package:immich_mobile/infrastructure/repositories/store.repository.dart';
 import 'package:immich_mobile/models/map/map_state.model.dart';
+import 'package:immich_mobile/providers/locale_provider.dart';
 import 'package:immich_mobile/providers/map/map_state.provider.dart';
 import 'package:immich_mobile/widgets/map/map_theme_override.dart';
+import 'package:isar/isar.dart';
 
 import '../../test_utils.dart';
 import '../../widget_tester_extensions.dart';
@@ -16,22 +20,28 @@ void main() {
   late MockMapStateNotifier mapStateNotifier;
   late List<Override> overrides;
   late MapState mapState;
+  late Isar db;
 
   setUpAll(() async {
     TestUtils.init();
+    db = await TestUtils.initIsar();
   });
 
-  setUp(() {
+  setUp(() async {
     mapState = MapState(themeMode: ThemeMode.dark);
     mapStateNotifier = MockMapStateNotifier(mapState);
-    overrides = [mapStateNotifierProvider.overrideWith(() => mapStateNotifier)];
+    await StoreService.init(storeRepository: IsarStoreRepository(db));
+    overrides = [
+      mapStateNotifierProvider.overrideWith(() => mapStateNotifier),
+      localeProvider.overrideWithValue(const Locale("en")),
+    ];
   });
 
   testWidgets("Return dark theme style when theme mode is dark",
       (tester) async {
     AsyncValue<String>? mapStyle;
     await tester.pumpConsumerWidget(
-      MapThemeOveride(
+      MapThemeOverride(
         mapBuilder: (AsyncValue<String> style) {
           mapStyle = style;
           return const Text("Mock");
@@ -49,7 +59,7 @@ void main() {
   testWidgets("Return error when style is not fetched", (tester) async {
     AsyncValue<String>? mapStyle;
     await tester.pumpConsumerWidget(
-      MapThemeOveride(
+      MapThemeOverride(
         mapBuilder: (AsyncValue<String> style) {
           mapStyle = style;
           return const Text("Mock");
@@ -69,7 +79,7 @@ void main() {
       (tester) async {
     AsyncValue<String>? mapStyle;
     await tester.pumpConsumerWidget(
-      MapThemeOveride(
+      MapThemeOverride(
         mapBuilder: (AsyncValue<String> style) {
           mapStyle = style;
           return const Text("Mock");
@@ -90,7 +100,7 @@ void main() {
     testWidgets("Return dark theme style when system is dark", (tester) async {
       AsyncValue<String>? mapStyle;
       await tester.pumpConsumerWidget(
-        MapThemeOveride(
+        MapThemeOverride(
           mapBuilder: (AsyncValue<String> style) {
             mapStyle = style;
             return const Text("Mock");
@@ -114,7 +124,7 @@ void main() {
         (tester) async {
       AsyncValue<String>? mapStyle;
       await tester.pumpConsumerWidget(
-        MapThemeOveride(
+        MapThemeOverride(
           mapBuilder: (AsyncValue<String> style) {
             mapStyle = style;
             return const Text("Mock");
@@ -138,7 +148,7 @@ void main() {
         (tester) async {
       AsyncValue<String>? mapStyle;
       await tester.pumpConsumerWidget(
-        MapThemeOveride(
+        MapThemeOverride(
           mapBuilder: (AsyncValue<String> style) {
             mapStyle = style;
             return const Text("Mock");

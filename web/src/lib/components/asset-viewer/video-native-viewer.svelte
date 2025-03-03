@@ -4,30 +4,54 @@
   import { getAssetPlaybackUrl, getAssetThumbnailUrl } from '$lib/utils';
   import { handleError } from '$lib/utils/handle-error';
   import { AssetMediaSize } from '@immich/sdk';
-  import { tick } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { swipe } from 'svelte-gestures';
   import type { SwipeCustomEvent } from 'svelte-gestures';
   import { fade } from 'svelte/transition';
   import { t } from 'svelte-i18n';
+  import { isFaceEditMode } from '$lib/stores/face-edit.svelte';
+  import FaceEditor from '$lib/components/asset-viewer/face-editor/face-editor.svelte';
 
-  export let assetId: string;
-  export let loopVideo: boolean;
-  export let checksum: string;
-  export let onPreviousAsset: () => void = () => {};
-  export let onNextAsset: () => void = () => {};
-  export let onVideoEnded: () => void = () => {};
-  export let onVideoStarted: () => void = () => {};
-
-  let element: HTMLVideoElement | undefined = undefined;
-  let isVideoLoading = true;
-  let assetFileUrl: string;
-  let forceMuted = false;
-
-  $: if (element) {
-    assetFileUrl = getAssetPlaybackUrl({ id: assetId, checksum });
-    forceMuted = false;
-    element.load();
+  interface Props {
+    assetId: string;
+    loopVideo: boolean;
+    cacheKey: string | null;
+    onPreviousAsset?: () => void;
+    onNextAsset?: () => void;
+    onVideoEnded?: () => void;
+    onVideoStarted?: () => void;
+    onClose?: () => void;
   }
+
+  let {
+    assetId,
+    loopVideo,
+    cacheKey,
+    onPreviousAsset = () => {},
+    onNextAsset = () => {},
+    onVideoEnded = () => {},
+    onVideoStarted = () => {},
+    onClose = () => {},
+  }: Props = $props();
+
+  let videoPlayer: HTMLVideoElement | undefined = $state();
+  let isLoading = $state(true);
+  let assetFileUrl = $state('');
+  let forceMuted = $state(false);
+
+  onMount(() => {
+    if (videoPlayer) {
+      assetFileUrl = getAssetPlaybackUrl({ id: assetId, cacheKey });
+      forceMuted = false;
+      videoPlayer.load();
+    }
+  });
+
+  onDestroy(() => {
+    if (videoPlayer) {
+      videoPlayer.src = '';
+    }
+  });
 
   const handleCanPlay = async (video: HTMLVideoElement) => {
     try {
@@ -38,16 +62,16 @@
         await tryForceMutedPlay(video);
         return;
       }
+
       handleError(error, $t('errors.unable_to_play_video'));
     } finally {
-      isVideoLoading = false;
+      isLoading = false;
     }
   };
 
   const tryForceMutedPlay = async (video: HTMLVideoElement) => {
     try {
-      forceMuted = true;
-      await tick();
+      video.muted = true;
       await handleCanPlay(video);
     } catch (error) {
       handleError(error, $t('errors.unable_to_play_video'));
@@ -62,35 +86,54 @@
       onPreviousAsset();
     }
   };
+
+  let containerWidth = $state(0);
+  let containerHeight = $state(0);
+
+  $effect(() => {
+    if (isFaceEditMode.value) {
+      videoPlayer?.pause();
+    }
+  });
 </script>
 
-<div transition:fade={{ duration: 150 }} class="flex h-full select-none place-content-center place-items-center">
+<div
+  transition:fade={{ duration: 150 }}
+  class="flex h-full select-none place-content-center place-items-center"
+  bind:clientWidth={containerWidth}
+  bind:clientHeight={containerHeight}
+>
   <video
-    bind:this={element}
+    bind:this={videoPlayer}
     loop={$loopVideoPreference && loopVideo}
     autoplay
     playsinline
     controls
     class="h-full object-contain"
-    use:swipe
-    on:swipe={onSwipe}
-    on:canplay={(e) => handleCanPlay(e.currentTarget)}
-    on:ended={onVideoEnded}
-    on:volumechange={(e) => {
+    use:swipe={() => ({})}
+    onswipe={onSwipe}
+    oncanplay={(e) => handleCanPlay(e.currentTarget)}
+    onended={onVideoEnded}
+    onvolumechange={(e) => {
       if (!forceMuted) {
         $videoViewerMuted = e.currentTarget.muted;
       }
     }}
+    onclose={() => onClose()}
     muted={forceMuted || $videoViewerMuted}
     bind:volume={$videoViewerVolume}
-    poster={getAssetThumbnailUrl({ id: assetId, size: AssetMediaSize.Preview, checksum })}
+    poster={getAssetThumbnailUrl({ id: assetId, size: AssetMediaSize.Preview, cacheKey })}
     src={assetFileUrl}
   >
   </video>
 
-  {#if isVideoLoading}
+  {#if isLoading}
     <div class="absolute flex place-content-center place-items-center">
       <LoadingSpinner />
     </div>
+  {/if}
+
+  {#if isFaceEditMode.value}
+    <FaceEditor htmlElement={videoPlayer} {containerWidth} {containerHeight} {assetId} />
   {/if}
 </div>

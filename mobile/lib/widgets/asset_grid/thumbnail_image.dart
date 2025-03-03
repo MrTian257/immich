@@ -131,23 +131,21 @@ class ThumbnailImage extends ConsumerWidget {
     }
 
     Widget buildImage() {
-      final image = SizedBox(
-        width: 300,
-        height: 300,
+      final image = SizedBox.expand(
         child: Hero(
           tag: isFromDto
               ? '${asset.remoteId}-$heroOffset'
               : asset.id + heroOffset,
           child: Stack(
             children: [
-              ImmichThumbnail(
-                asset: asset,
-                height: 250,
-                width: 250,
+              SizedBox.expand(
+                child: ImmichThumbnail(
+                  asset: asset,
+                  height: 250,
+                  width: 250,
+                ),
               ),
               Container(
-                height: 250,
-                width: 250,
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
@@ -206,6 +204,13 @@ class ThumbnailImage extends ConsumerWidget {
                     storageIcon(asset),
                     color: Colors.white.withOpacity(.8),
                     size: 16,
+                    shadows: [
+                      Shadow(
+                        blurRadius: 5.0,
+                        color: Colors.black.withOpacity(0.6),
+                        offset: const Offset(0.0, 0.0),
+                      ),
+                    ],
                   ),
                 ),
               if (asset.isFavorite)

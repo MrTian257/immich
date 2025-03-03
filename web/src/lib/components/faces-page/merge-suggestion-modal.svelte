@@ -1,22 +1,34 @@
 <script lang="ts">
+  import { onMount, tick } from 'svelte';
   import Icon from '$lib/components/elements/icon.svelte';
   import FullScreenModal from '$lib/components/shared-components/full-screen-modal.svelte';
   import { getPeopleThumbnailUrl } from '$lib/utils';
   import { type PersonResponseDto } from '@immich/sdk';
+  import { Button } from '@immich/ui';
   import { mdiArrowLeft, mdiMerge } from '@mdi/js';
   import ImageThumbnail from '../assets/thumbnail/image-thumbnail.svelte';
-  import Button from '../elements/buttons/button.svelte';
   import CircleIconButton from '../elements/buttons/circle-icon-button.svelte';
   import { t } from 'svelte-i18n';
 
-  export let personMerge1: PersonResponseDto;
-  export let personMerge2: PersonResponseDto;
-  export let potentialMergePeople: PersonResponseDto[];
-  export let onReject: () => void;
-  export let onConfirm: ([personMerge1, personMerge2]: [PersonResponseDto, PersonResponseDto]) => void;
-  export let onClose: () => void;
+  interface Props {
+    personMerge1: PersonResponseDto;
+    personMerge2: PersonResponseDto;
+    potentialMergePeople: PersonResponseDto[];
+    onReject: () => void;
+    onConfirm: ([personMerge1, personMerge2]: [PersonResponseDto, PersonResponseDto]) => void;
+    onClose: () => void;
+  }
 
-  let choosePersonToMerge = false;
+  let {
+    personMerge1 = $bindable(),
+    personMerge2 = $bindable(),
+    potentialMergePeople = $bindable(),
+    onReject,
+    onConfirm,
+    onClose,
+  }: Props = $props();
+
+  let choosePersonToMerge = $state(false);
 
   const title = personMerge2.name;
 
@@ -25,6 +37,11 @@
     [potentialMergePeople[index], personMerge2] = [personMerge2, potentialMergePeople[index]];
     choosePersonToMerge = false;
   };
+
+  onMount(async () => {
+    await tick();
+    document.querySelector<HTMLElement>('#merge-confirm-button')?.focus();
+  });
 </script>
 
 <FullScreenModal title="{$t('merge_people')} - {title}" {onClose}>
@@ -43,7 +60,7 @@
         <CircleIconButton
           title={$t('swap_merge_direction')}
           icon={mdiMerge}
-          on:click={() => ([personMerge1, personMerge2] = [personMerge2, personMerge1])}
+          onclick={() => ([personMerge1, personMerge2] = [personMerge2, personMerge1])}
         />
       </div>
 
@@ -51,7 +68,7 @@
         type="button"
         disabled={potentialMergePeople.length === 0}
         class="flex h-28 w-28 items-center rounded-full border-2 border-immich-primary px-1 dark:border-immich-dark-primary md:h-32 md:w-32 md:px-2"
-        on:click={() => {
+        onclick={() => {
           if (potentialMergePeople.length > 0) {
             choosePersonToMerge = !choosePersonToMerge;
           }
@@ -69,13 +86,13 @@
     {:else}
       <div class="grid w-full grid-cols-1 gap-2">
         <div class="px-2">
-          <button type="button" on:click={() => (choosePersonToMerge = false)}> <Icon path={mdiArrowLeft} /></button>
+          <button type="button" onclick={() => (choosePersonToMerge = false)}> <Icon path={mdiArrowLeft} /></button>
         </div>
         <div class="flex items-center justify-center">
           <div class="flex flex-wrap justify-center md:grid md:grid-cols-{potentialMergePeople.length}">
             {#each potentialMergePeople as person (person.id)}
               <div class="h-24 w-24 md:h-28 md:w-28">
-                <button type="button" class="p-2 w-full" on:click={() => changePersonToMerge(person)}>
+                <button type="button" class="p-2 w-full" onclick={() => changePersonToMerge(person)}>
                   <ImageThumbnail
                     border={true}
                     circle
@@ -83,7 +100,7 @@
                     url={getPeopleThumbnailUrl(person)}
                     altText={person.name}
                     widthStyle="100%"
-                    on:click={() => changePersonToMerge(person)}
+                    onClick={() => changePersonToMerge(person)}
                   />
                 </button>
               </div>
@@ -100,8 +117,11 @@
   <div class="flex px-4 pt-2">
     <p class="text-sm text-gray-500 dark:text-gray-300">{$t('they_will_be_merged_together')}</p>
   </div>
-  <svelte:fragment slot="sticky-bottom">
-    <Button fullwidth color="gray" on:click={onReject}>{$t('no')}</Button>
-    <Button fullwidth on:click={() => onConfirm([personMerge1, personMerge2])}>{$t('yes')}</Button>
-  </svelte:fragment>
+
+  {#snippet stickyBottom()}
+    <Button fullWidth shape="round" color="secondary" onclick={onReject}>{$t('no')}</Button>
+    <Button id="merge-confirm-button" fullWidth shape="round" onclick={() => onConfirm([personMerge1, personMerge2])}>
+      {$t('yes')}
+    </Button>
+  {/snippet}
 </FullScreenModal>

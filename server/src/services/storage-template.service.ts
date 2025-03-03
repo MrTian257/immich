@@ -3,15 +3,15 @@ import handlebar from 'handlebars';
 import { DateTime } from 'luxon';
 import path from 'node:path';
 import sanitize from 'sanitize-filename';
+import { JOBS_ASSET_PAGINATION_SIZE } from 'src/constants';
 import { StorageCore } from 'src/cores/storage.core';
-import { OnEvent } from 'src/decorators';
+import { OnEvent, OnJob } from 'src/decorators';
 import { SystemConfigTemplateStorageOptionDto } from 'src/dtos/system-config.dto';
 import { AssetEntity } from 'src/entities/asset.entity';
-import { AssetPathType, AssetType, StorageFolder } from 'src/enum';
-import { DatabaseLock } from 'src/interfaces/database.interface';
-import { ArgOf } from 'src/interfaces/event.interface';
-import { IEntityJob, JOBS_ASSET_PAGINATION_SIZE, JobStatus } from 'src/interfaces/job.interface';
+import { AssetPathType, AssetType, DatabaseLock, JobName, JobStatus, QueueName, StorageFolder } from 'src/enum';
+import { ArgOf } from 'src/repositories/event.repository';
 import { BaseService } from 'src/services/base.service';
+import { JobOf } from 'src/types';
 import { getLivePhotoMotionFilename } from 'src/utils/file';
 import { usePagination } from 'src/utils/pagination';
 
@@ -74,13 +74,18 @@ export class StorageTemplateService extends BaseService {
     return this._template;
   }
 
-  @OnEvent({ name: 'config.update', server: true })
-  onConfigUpdate({ newConfig }: ArgOf<'config.update'>) {
+  @OnEvent({ name: 'config.init' })
+  onConfigInit({ newConfig }: ArgOf<'config.init'>) {
     const template = newConfig.storageTemplate.template;
     if (!this._template || template !== this.template.raw) {
       this.logger.debug(`Compiling new storage template: ${template}`);
       this._template = this.compile(template);
     }
+  }
+
+  @OnEvent({ name: 'config.update', server: true })
+  onConfigUpdate({ newConfig }: ArgOf<'config.update'>) {
+    this.onConfigInit({ newConfig });
   }
 
   @OnEvent({ name: 'config.validate' })
@@ -108,7 +113,8 @@ export class StorageTemplateService extends BaseService {
     return { ...storageTokens, presetOptions: storagePresets };
   }
 
-  async handleMigrationSingle({ id }: IEntityJob): Promise<JobStatus> {
+  @OnJob({ name: JobName.STORAGE_TEMPLATE_MIGRATION_SINGLE, queue: QueueName.STORAGE_TEMPLATE_MIGRATION })
+  async handleMigrationSingle({ id }: JobOf<JobName.STORAGE_TEMPLATE_MIGRATION_SINGLE>): Promise<JobStatus> {
     const config = await this.getConfig({ withCache: true });
     const storageTemplateEnabled = config.storageTemplate.enabled;
     if (!storageTemplateEnabled) {
@@ -137,6 +143,7 @@ export class StorageTemplateService extends BaseService {
     return JobStatus.SUCCESS;
   }
 
+  @OnJob({ name: JobName.STORAGE_TEMPLATE_MIGRATION, queue: QueueName.STORAGE_TEMPLATE_MIGRATION })
   async handleMigration(): Promise<JobStatus> {
     this.logger.log('Starting storage template migration');
     const { storageTemplate } = await this.getConfig({ withCache: true });
@@ -297,6 +304,7 @@ export class StorageTemplateService extends BaseService {
       filetype: asset.type == AssetType.IMAGE ? 'IMG' : 'VID',
       filetypefull: asset.type == AssetType.IMAGE ? 'IMAGE' : 'VIDEO',
       assetId: asset.id,
+      assetIdShort: asset.id.slice(-12),
       //just throw into the root if it doesn't belong to an album
       album: (albumName && sanitize(albumName.replaceAll(/\.+/g, ''))) || '',
     };

@@ -1,17 +1,19 @@
 <script lang="ts">
-  import Icon from '$lib/components/elements/icon.svelte';
-  import EmptyPlaceholder from '$lib/components/shared-components/empty-placeholder.svelte';
   import LibraryImportPathsForm from '$lib/components/forms/library-import-paths-form.svelte';
   import LibraryRenameForm from '$lib/components/forms/library-rename-form.svelte';
   import LibraryScanSettingsForm from '$lib/components/forms/library-scan-settings-form.svelte';
   import LibraryUserPickerForm from '$lib/components/forms/library-user-picker-form.svelte';
   import UserPageLayout from '$lib/components/layouts/user-page-layout.svelte';
+  import ButtonContextMenu from '$lib/components/shared-components/context-menu/button-context-menu.svelte';
   import MenuOption from '$lib/components/shared-components/context-menu/menu-option.svelte';
+  import { dialogController } from '$lib/components/shared-components/dialog/dialog';
+  import EmptyPlaceholder from '$lib/components/shared-components/empty-placeholder.svelte';
   import LoadingSpinner from '$lib/components/shared-components/loading-spinner.svelte';
   import {
     notificationController,
     NotificationType,
   } from '$lib/components/shared-components/notification/notification';
+  import { locale } from '$lib/stores/preferences.store';
   import { ByteUnit, getBytesWithUnit } from '$lib/utils/byte-units';
   import { handleError } from '$lib/utils/handle-error';
   import {
@@ -20,49 +22,57 @@
     getAllLibraries,
     getLibraryStatistics,
     getUserAdmin,
+    JobCommand,
+    JobName,
     scanLibrary,
+    sendJobCommand,
     updateLibrary,
     type LibraryResponseDto,
     type LibraryStatsResponseDto,
     type UserResponseDto,
   } from '@immich/sdk';
-  import { mdiDatabase, mdiDotsVertical, mdiPlusBoxOutline, mdiSync } from '@mdi/js';
+  import { Button, Text } from '@immich/ui';
+  import { mdiDotsVertical, mdiPlusBoxOutline, mdiSync } from '@mdi/js';
   import { onMount } from 'svelte';
-  import { fade, slide } from 'svelte/transition';
-  import LinkButton from '../../../lib/components/elements/buttons/link-button.svelte';
-  import type { PageData } from './$types';
-  import { dialogController } from '$lib/components/shared-components/dialog/dialog';
   import { t } from 'svelte-i18n';
-  import ButtonContextMenu from '$lib/components/shared-components/context-menu/button-context-menu.svelte';
-  import { locale } from '$lib/stores/preferences.store';
+  import { fade, slide } from 'svelte/transition';
+  import type { PageData } from './$types';
+  import LibraryImportPathForm from '$lib/components/forms/library-import-path-form.svelte';
 
-  export let data: PageData;
+  interface Props {
+    data: PageData;
+  }
 
-  let libraries: LibraryResponseDto[] = [];
+  let { data }: Props = $props();
+
+  let libraries: LibraryResponseDto[] = $state([]);
 
   let stats: LibraryStatsResponseDto[] = [];
-  let owner: UserResponseDto[] = [];
-  let photos: number[] = [];
-  let videos: number[] = [];
-  let totalCount: number[] = [];
-  let diskUsage: number[] = [];
-  let diskUsageUnit: ByteUnit[] = [];
-  let editImportPaths: number | null;
-  let editScanSettings: number | null;
-  let renameLibrary: number | null;
+  let owner: UserResponseDto[] = $state([]);
+  let photos: number[] = $state([]);
+  let videos: number[] = $state([]);
+  let totalCount: number[] = $state([]);
+  let diskUsage: number[] = $state([]);
+  let diskUsageUnit: ByteUnit[] = $state([]);
+  let editImportPaths: number | undefined = $state();
+  let editScanSettings: number | undefined = $state();
+  let renameLibrary: number | undefined = $state();
   let updateLibraryIndex: number | null;
   let dropdownOpen: boolean[] = [];
-  let toCreateLibrary = false;
+  let toCreateLibrary = $state(false);
+  let toAddImportPath = $state(false);
+  let importPathToAdd: string | null = $state(null);
 
   onMount(async () => {
     await readLibraryList();
   });
 
   const closeAll = () => {
-    editImportPaths = null;
-    editScanSettings = null;
-    renameLibrary = null;
+    editImportPaths = undefined;
+    editScanSettings = undefined;
+    renameLibrary = undefined;
     updateLibraryIndex = null;
+    toAddImportPath = false;
 
     for (let index = 0; index < dropdownOpen.length; index++) {
       dropdownOpen[index] = false;
@@ -89,8 +99,9 @@
   }
 
   const handleCreate = async (ownerId: string) => {
+    let createdLibrary: LibraryResponseDto | undefined;
     try {
-      const createdLibrary = await createLibrary({ createLibraryDto: { ownerId } });
+      createdLibrary = await createLibrary({ createLibraryDto: { ownerId } });
       notificationController.show({
         message: $t('admin.library_created', { values: { library: createdLibrary.name } }),
         type: NotificationType.Info,
@@ -100,6 +111,29 @@
     } finally {
       toCreateLibrary = false;
       await readLibraryList();
+    }
+
+    if (createdLibrary) {
+      // Open the import paths form for the newly created library
+      updateLibraryIndex = libraries.findIndex((library) => library.id === createdLibrary.id);
+      toAddImportPath = true;
+    }
+  };
+
+  const handleAddImportPath = () => {
+    if (!updateLibraryIndex || !importPathToAdd) {
+      return;
+    }
+
+    try {
+      onEditImportPathClicked(updateLibraryIndex);
+
+      libraries[updateLibraryIndex].importPaths.push(importPathToAdd);
+    } catch (error) {
+      handleError(error, $t('errors.unable_to_add_import_path'));
+    } finally {
+      importPathToAdd = null;
+      toAddImportPath = false;
     }
   };
 
@@ -120,9 +154,8 @@
 
   const handleScanAll = async () => {
     try {
-      for (const library of libraries) {
-        await scanLibrary({ id: library.id });
-      }
+      await sendJobCommand({ id: JobName.Library, jobCommandDto: { command: JobCommand.Start } });
+
       notificationController.show({
         message: $t('admin.refreshing_all_libraries'),
         type: NotificationType.Info,
@@ -212,23 +245,40 @@
   <LibraryUserPickerForm onSubmit={handleCreate} onCancel={() => (toCreateLibrary = false)} />
 {/if}
 
+{#if toAddImportPath}
+  <LibraryImportPathForm
+    title={$t('add_import_path')}
+    submitText={$t('add')}
+    bind:importPath={importPathToAdd}
+    onSubmit={handleAddImportPath}
+    onCancel={() => {
+      toAddImportPath = false;
+      if (updateLibraryIndex) {
+        onEditImportPathClicked(updateLibraryIndex);
+      }
+    }}
+  />
+{/if}
+
 <UserPageLayout title={data.meta.title} admin>
-  <div class="flex justify-end gap-2" slot="buttons">
-    {#if libraries.length > 0}
-      <LinkButton on:click={() => handleScanAll()}>
-        <div class="flex gap-1 text-sm">
-          <Icon path={mdiSync} size="18" />
-          <span>{$t('scan_all_libraries')}</span>
-        </div>
-      </LinkButton>
-    {/if}
-    <LinkButton on:click={() => (toCreateLibrary = true)}>
-      <div class="flex gap-1 text-sm">
-        <Icon path={mdiPlusBoxOutline} size="18" />
-        <span>{$t('create_library')}</span>
-      </div>
-    </LinkButton>
-  </div>
+  {#snippet buttons()}
+    <div class="flex justify-end gap-2">
+      {#if libraries.length > 0}
+        <Button leadingIcon={mdiSync} onclick={handleScanAll} size="small" variant="ghost" color="secondary">
+          <Text class="hidden md:block">{$t('scan_all_libraries')}</Text>
+        </Button>
+      {/if}
+      <Button
+        leadingIcon={mdiPlusBoxOutline}
+        onclick={() => (toCreateLibrary = true)}
+        size="small"
+        variant="ghost"
+        color="secondary"
+      >
+        <Text class="hidden md:block">{$t('create_library')}</Text>
+      </Button>
+    </div>
+  {/snippet}
   <section class="my-4">
     <div class="flex flex-col gap-2" in:fade={{ duration: 500 }}>
       {#if libraries.length > 0}
@@ -237,12 +287,12 @@
             class="mb-4 flex h-12 w-full rounded-md border bg-gray-50 text-immich-primary dark:border-immich-dark-gray dark:bg-immich-dark-gray dark:text-immich-dark-primary"
           >
             <tr class="grid grid-cols-6 w-full place-items-center">
-              <th class="text-center text-sm font-medium">{$t('type')}</th>
               <th class="text-center text-sm font-medium">{$t('name')}</th>
               <th class="text-center text-sm font-medium">{$t('owner')}</th>
-              <th class="text-center text-sm font-medium">{$t('assets')}</th>
+              <th class="text-center text-sm font-medium">{$t('photos')}</th>
+              <th class="text-center text-sm font-medium">{$t('videos')}</th>
               <th class="text-center text-sm font-medium">{$t('size')}</th>
-              <th class="text-center text-sm font-medium" />
+              <th class="text-center text-sm font-medium"></th>
             </tr>
           </thead>
           <tbody class="block overflow-y-auto rounded-md border dark:border-immich-dark-gray">
@@ -254,28 +304,27 @@
                     : 'bg-immich-bg dark:bg-immich-dark-gray/50'
                 }`}
               >
-                <td class=" px-10 text-sm">
-                  <Icon
-                    path={mdiDatabase}
-                    size="40"
-                    title={$t('admin.external_library_created_at', { values: { date: library.createdAt } })}
-                  />
-                </td>
-
-                <td class=" text-ellipsis px-4 text-sm">{library.name}</td>
-                <td class=" text-ellipsis px-4 text-sm">
+                <td class="text-ellipsis px-4 text-sm">{library.name}</td>
+                <td class="text-ellipsis px-4 text-sm">
                   {#if owner[index] == undefined}
                     <LoadingSpinner size="40" />
                   {:else}{owner[index].name}{/if}
                 </td>
-                <td class=" text-ellipsis px-4 text-sm">
-                  {#if totalCount[index] == undefined}
+                <td class="text-ellipsis px-4 text-sm">
+                  {#if photos[index] == undefined}
                     <LoadingSpinner size="40" />
                   {:else}
-                    {totalCount[index].toLocaleString($locale)}
+                    {photos[index].toLocaleString($locale)}
                   {/if}
                 </td>
-                <td class=" text-ellipsis px-4 text-sm">
+                <td class="text-ellipsis px-4 text-sm">
+                  {#if videos[index] == undefined}
+                    <LoadingSpinner size="40" />
+                  {:else}
+                    {videos[index].toLocaleString($locale)}
+                  {/if}
+                </td>
+                <td class="text-ellipsis px-4 text-sm">
                   {#if diskUsage[index] == undefined}
                     <LoadingSpinner size="40" />
                   {:else}
@@ -284,7 +333,7 @@
                   {/if}
                 </td>
 
-                <td class=" text-ellipsis px-4 text-sm">
+                <td class="text-ellipsis px-4 text-sm">
                   <ButtonContextMenu
                     align="top-right"
                     direction="left"
@@ -309,21 +358,28 @@
                 </td>
               </tr>
               {#if renameLibrary === index}
+                <!-- svelte-ignore node_invalid_placement_ssr -->
                 <div transition:slide={{ duration: 250 }}>
-                  <LibraryRenameForm {library} onSubmit={handleUpdate} onCancel={() => (renameLibrary = null)} />
+                  <LibraryRenameForm {library} onSubmit={handleUpdate} onCancel={() => (renameLibrary = undefined)} />
                 </div>
               {/if}
               {#if editImportPaths === index}
+                <!-- svelte-ignore node_invalid_placement_ssr -->
                 <div transition:slide={{ duration: 250 }}>
-                  <LibraryImportPathsForm {library} onSubmit={handleUpdate} onCancel={() => (editImportPaths = null)} />
+                  <LibraryImportPathsForm
+                    {library}
+                    onSubmit={handleUpdate}
+                    onCancel={() => (editImportPaths = undefined)}
+                  />
                 </div>
               {/if}
               {#if editScanSettings === index}
+                <!-- svelte-ignore node_invalid_placement_ssr -->
                 <div transition:slide={{ duration: 250 }} class="mb-4 ml-4 mr-4">
                   <LibraryScanSettingsForm
                     {library}
                     onSubmit={handleUpdate}
-                    onCancel={() => (editScanSettings = null)}
+                    onCancel={() => (editScanSettings = undefined)}
                   />
                 </div>
               {/if}

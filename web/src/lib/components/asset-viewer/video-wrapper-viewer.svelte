@@ -1,27 +1,44 @@
 <script lang="ts">
-  import { AssetTypeEnum } from '@immich/sdk';
   import { ProjectionType } from '$lib/constants';
   import VideoNativeViewer from '$lib/components/asset-viewer/video-native-viewer.svelte';
-  import PanoramaViewer from '$lib/components/asset-viewer/panorama-viewer.svelte';
+  import VideoPanoramaViewer from '$lib/components/asset-viewer/video-panorama-viewer.svelte';
 
-  export let assetId: string;
-  export let projectionType: string | null | undefined;
-  export let checksum: string;
-  export let loopVideo: boolean;
-  export let onPreviousAsset: () => void;
-  export let onNextAsset: () => void;
+  interface Props {
+    assetId: string;
+    projectionType: string | null | undefined;
+    cacheKey: string | null;
+    loopVideo: boolean;
+    onClose?: () => void;
+    onPreviousAsset?: () => void;
+    onNextAsset?: () => void;
+    onVideoEnded?: () => void;
+    onVideoStarted?: () => void;
+  }
+
+  let {
+    assetId,
+    projectionType,
+    cacheKey,
+    loopVideo,
+    onPreviousAsset,
+    onClose,
+    onNextAsset,
+    onVideoEnded,
+    onVideoStarted,
+  }: Props = $props();
 </script>
 
 {#if projectionType === ProjectionType.EQUIRECTANGULAR}
-  <PanoramaViewer asset={{ id: assetId, type: AssetTypeEnum.Video }} />
+  <VideoPanoramaViewer {assetId} />
 {:else}
   <VideoNativeViewer
     {loopVideo}
-    {checksum}
+    {cacheKey}
     {assetId}
     {onPreviousAsset}
     {onNextAsset}
-    on:onVideoEnded
-    on:onVideoStarted
+    {onVideoEnded}
+    {onVideoStarted}
+    {onClose}
   />
 {/if}
